@@ -1,0 +1,112 @@
+# Forex Signal Generator configuration.
+# Values marked (env) can be overridden from .env / environment variables — see .env.example.
+
+mcp:
+  command: node
+  server_path: ~/tradingview-mcp/src/server.js   # (env) TV_MCP_SERVER_PATH — see README step 2
+  call_timeout_s: 45
+  max_calls_per_second: 4        # rate-limit protection for the TradingView Desktop bridge
+  retries: 3
+  backoff_base_s: 1.0
+
+paths:
+  output_dir: .                  # forex_signals_YYYY-MM-DD.json is written here
+  state_dir: ./state             # history, caches, scan archive, lock
+  log_dir: ./logs
+
+pairs:
+  majors: [EURUSD, GBPUSD, USDJPY, USDCHF, AUDUSD, NZDUSD, USDCAD]
+  crosses: [EURGBP, EURJPY, GBPJPY, GBPCHF, EURAUD, EURCHF, AUDJPY, AUDNZD, GBPAUD, GBPCAD, CADJPY, CHFJPY]
+  metals: [XAUUSD]
+
+data:
+  preferred_exchanges: [OANDA, FXCM, FOREXCOM]   # first match from symbol_search wins
+  bars: {M5: 300, M15: 300, H1: 300, H4: 300, D1: 300}
+  max_data_age_minutes: 15       # market open + older M5 data => STALE_DATA (WAIT)
+  price_sanity_tolerance_pct: 1.5  # live quote vs H1 candle close; larger gap => data not trusted
+  restore_chart_after_scan: true
+  calendar_cache_minutes: 30
+  news_cache_minutes: 15
+  news_enabled: true
+
+analysis:
+  min_bars: 60
+  swing_width: {M5: 3, M15: 3, H1: 3, H4: 2, D1: 2}
+  rsi_overbought: 70
+  rsi_oversold: 30
+  adx_trend_min: 20
+  max_extension_atr: 1.5         # market entry only if price within 1.5 ATR(H1) of H1 EMA20
+  trigger_max_bars_ago: {M15: 8, H1: 4}
+  sl_buffer_atr: 0.25            # stop placed this far beyond the structural level
+  min_sl_atr: 0.5
+  max_sl_atr: 3.0                # wider structural stop => WAIT (no arbitrary tightening)
+  limit_min_distance_atr: 0.3
+  limit_max_distance_atr: 2.0
+  stop_entry_buffer_atr: 0.1
+  tp_front_run_atr: 0.1
+  strong_signal_min_structure: 15  # below this structure score, confidence is capped at 74
+  momentum_mode: adaptive        # adaptive: pullback/order-block entries use H4 momentum; strict: H1 rules for all
+  pullback:
+    htf_rsi_max: 75              # H4 RSI above this (below 25 for sells) = too stretched
+    h1_rsi_floor: 30             # H1 RSI below this in a buy pullback = reversal, not a pullback
+  order_block:                   # SMC order blocks: last opposite candle before a BOS/CHOCH impulse
+    min_displacement_atr: 1.0    # impulse from the block to the break close must be >= 1 ATR
+    search_back: 10              # bars searched back from the leg extreme for the opposite candle
+    max_per_side: 3              # most recent valid blocks kept per direction
+    tap_window_hours: 6          # a block counts as "tapped" if price returned into it within this window
+
+signals:
+  min_confidence: 65
+  min_risk_reward: 2.0
+  preferred_risk_reward: 3.0
+  top_n: 10
+  expiry_minutes: {MARKET_ENTRY: 60, BUY_LIMIT: 240, SELL_LIMIT: 240, BUY_STOP: 240, SELL_STOP: 240}
+  remind_before_end_minutes: 30   # Telegram reminder this long before a signal's 'don't take after' time
+
+news_filter:
+  blackout_minutes_before: 60    # no new trades this close to a high-impact release
+  blackout_minutes_after: 15
+  caution_hours: 4
+  summary_hours: 72
+
+spreads:
+  max_spread_pips: {DEFAULT: 3.0, JPY_CROSS: 4.0, GBPAUD: 5.0, GBPCAD: 5.0, EURAUD: 4.5, GBPCHF: 4.5, AUDNZD: 4.5, XAUUSD: 6.0}
+  max_spread_to_stop_ratio: 0.15
+
+risk:
+  account_balance: null          # optional planning amount; usually entered in the dashboard (not read from any broker)
+  account_currency: USD          # (env) FXSIG_ACCOUNT_CURRENCY
+  risk_per_trade_pct: 1.0
+  max_open_positions: 3
+  max_daily_loss_pct: 3.0
+  daily_loss_used_pct: 0.0       # (env) FXSIG_DAILY_LOSS_USED_PCT — set from your broker statement
+  max_currency_exposure_pct: 2.0 # max risk stacked on one currency in one direction
+  max_total_risk_pct: 3.0        # max combined risk of all open trades (worst case if every stop hits)
+  # The dashboard "Account" panel saves balance/risk to state/account.json, which overrides these values.
+  lot_step: 0.01
+  min_lot: 0.01
+  min_lot_tolerance: 1.25        # allow the 0.01 minimum when it risks at most 25% more than the per-trade budget
+
+scan:
+  interval_minutes: 10           # (env) FXSIG_SCAN_INTERVAL_MINUTES
+  min_seconds_between_scans: 300 # duplicate-scan protection (override with --force)
+  scan_when_market_closed: false # scheduled scans skip the weekend; manual --force still works
+  scan_days: [Mon, Tue, Wed, Thu, Fri]  # automatic scans only on these days (manual --force still works)
+  scan_timezone: Europe/Lisbon   # timezone used to decide the day (this Mac's timezone)
+
+backtest_schedule:               # strict vs adaptive comparison while the market is closed; results to Telegram + dashboard
+  enabled: true
+  day: Sat                       # in scan_timezone
+  hour: 10                       # runs at the first scheduler tick at/after this hour, once per week
+  h1_bars: 5000                  # ≈ 10 months of H1 history
+
+dashboard:
+  host: 127.0.0.1
+  port: 8765                     # (env) FXSIG_DASHBOARD_PORT
+  # Visitors arriving through the Cloudflare tunnel can view everything; only these logged-in
+  # emails (Cloudflare Access) may run scans or change the shared settings. Local use on this Mac is unrestricted.
+  admin_emails: []               # (env) FXSIG_ADMIN_EMAILS=a@x.com,b@y.com
+  public_url: null               # (env) FXSIG_PUBLIC_URL — your Cloudflare Tunnel link, if any (README step 9)
+
+logging:
+  level: INFO

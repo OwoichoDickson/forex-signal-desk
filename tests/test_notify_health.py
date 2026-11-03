@@ -25,7 +25,7 @@ class FakeTG:
     def flush(self):
         return 0
 
-    def broadcast(self, text):
+    def broadcast(self, text, *a):
         return 0
 
 

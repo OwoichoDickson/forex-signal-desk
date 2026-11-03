@@ -84,7 +84,7 @@ def test_followers_get_signals_without_owner_details(cfg, monkeypatch):
     tg = TG()
     tg.state_dir = state
     from fxsignals.notify import Telegram
-    tg.broadcast = lambda text: Telegram.broadcast(tg, text)
+    tg.broadcast = lambda text, *a: Telegram.broadcast(tg, text, *a)
     tg.enabled = True
     monkeypatch.setattr("fxsignals.scanner.Telegram", lambda cfg: tg)
     h = SignalHistory(state / "signal_history.json", {"MARKET_ENTRY": 60})
@@ -165,3 +165,55 @@ def test_signals_past_deadline_go_to_archive(cfg):
     h = SignalHistory(Path(cfg["paths"]["state_dir"]) / "signal_history.json", {"MARKET_ENTRY": 60})
     h.records.append(rec)
     assert "Archive" in archive_text(h, now, {}) and "still running -0.6R" in archive_text(h, now, {})
+
+
+def test_delete_signal_for_followers(tmp_path):
+    from fxsignals import bot
+    from fxsignals.notify import Telegram
+    state = tmp_path
+    for cid in (77, 78):
+        subscribers.request(state, {"id": cid})
+        subscribers.decide(state, cid, "approved")
+    calls = []
+
+    class TG(Telegram):
+        def __init__(self):
+            self.state_dir, self.chat_id, self.token = state, "1", "x"
+
+        def _call(self, method, data=None):
+            calls.append((method, data))
+            return {"ok": True, "result": {"message_id": len(calls)}}
+
+    tg = TG()
+    assert tg.broadcast("🟢 BUY EURUSD", "sigA", "EURUSD BUY") == 2
+    tg.broadcast("🔴 SELL GBPUSD", "sigB", "GBPUSD SELL")
+    text, buttons = bot.delete_menu(state)
+    assert [b[0][1] for b in buttons] == ["del:sigB", "del:sigA", "del:all"]  # newest first, then everything
+    answers, edits = [], []
+    tg.answer_callback = lambda cid, t: answers.append(t)
+    tg.replace_buttons = lambda *a: edits.append(a)
+    bot.handle_delete({"paths": {"state_dir": str(state)}}, tg, {"id": "q", "message": {"chat": {"id": 1}, "message_id": 9}}, "sigA")
+    deleted = [(d["chat_id"], d["message_id"]) for m, d in calls if m == "deleteMessage"]
+    assert deleted == [("77", 1), ("78", 2)] and answers == ["Deleted 2 message(s)"]
+    assert [r["signal_id"] for r in subscribers.sent(state)] == ["sigB", "sigB"]  # sigA forgotten, sigB kept
+
+
+def test_followers_cannot_use_owner_commands(tmp_path):
+    from fxsignals import bot
+    subscribers.request(tmp_path, {"id": 77})
+    subscribers.decide(tmp_path, 77, "approved")
+    out, owner = [], []
+
+    class TG:
+        def send_to(self, cid, text, buttons=None):
+            out.append(text)
+
+        def send(self, *a, **k):
+            owner.append(a)
+
+    cfg = {"paths": {"state_dir": str(tmp_path)}, "signals": {"expiry_minutes": {}}}
+    for cmd in ("/users", "/remove 78", "/delete", "/mytrades", "/took EURUSD"):
+        bot.handle_follower(cfg, TG(), {"chat": {"id": 77}, "text": cmd})
+    assert all(t == bot.FOLLOWER_HELP for t in out) and not owner
+    for word in ("/users", "/remove", "/delete", "/mytrades"):
+        assert word not in bot.FOLLOWER_HELP

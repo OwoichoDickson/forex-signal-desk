@@ -214,7 +214,7 @@ def notify_history(cfg: dict, history: SignalHistory, ranked: list[dict]) -> Non
             if tg.enabled:
                 tg.send(text, buttons)
                 if key in neutral:
-                    tg.broadcast(neutral[key])
+                    tg.broadcast(neutral[key], rec.get("signal_id"), f"{rec.get('symbol')} {rec.get('direction')}")
             sent.add(key)
         rec["notified_events"] = sorted(sent)
 

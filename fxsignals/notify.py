@@ -117,23 +117,46 @@ class Telegram:
         except (urllib.error.URLError, TimeoutError, OSError):
             pass
 
-    def send_to(self, chat_id, text: str, buttons=None) -> bool:
-        """Best effort to another chat (followers, approval replies): no outbox, no retries."""
+    def send_to(self, chat_id, text: str, buttons=None) -> Optional[int]:
+        """Best effort to another chat (followers, approval replies): no outbox, no retries.
+        Returns the Telegram message id (truthy) when sent, else None."""
         if not self.token:
-            return False
+            return None
         try:
             data = {"chat_id": chat_id, "text": text[:4000], "parse_mode": "HTML", "disable_web_page_preview": "true"}
             if buttons:
                 data["reply_markup"] = self._markup(buttons)
-            return bool(self._call("sendMessage", data).get("ok"))
+            res = self._call("sendMessage", data)
+            return (res.get("result") or {}).get("message_id") or True if res.get("ok") else None
         except (urllib.error.URLError, TimeoutError, OSError):
-            return False
+            return None
 
-    def broadcast(self, text: str) -> int:
-        """Send a signal message to every approved follower (owner-only lines removed)."""
+    def broadcast(self, text: str, signal_id: Optional[str] = None, label: str = "") -> int:
+        """Send a signal message to every approved follower (owner-only lines removed).
+        Message ids are remembered so the owner can delete them for everyone (/delete)."""
         from . import subscribers
-        msg = for_follower(text)
-        return sum(self.send_to(cid, msg) for cid in subscribers.approved(self.state_dir) if cid != str(self.chat_id))
+        msg, sent = for_follower(text), []
+        for cid in subscribers.approved(self.state_dir):
+            if cid == str(self.chat_id):
+                continue
+            mid = self.send_to(cid, msg)
+            if mid:
+                sent.append({"chat": cid, "msg": mid if isinstance(mid, int) else None, "signal_id": signal_id, "label": label})
+        subscribers.record_sent(self.state_dir, [s for s in sent if s["msg"]])
+        return len(sent)
+
+    def delete_for_followers(self, rows: list[dict]) -> int:
+        """Delete broadcast messages from followers' chats (Telegram allows this for 48 hours)."""
+        from . import subscribers
+        done = 0
+        for r in rows:
+            try:
+                res = self._call("deleteMessage", {"chat_id": r["chat"], "message_id": r["msg"]})
+                done += bool(res.get("ok"))
+            except (urllib.error.URLError, TimeoutError, OSError):
+                pass
+        subscribers.forget_sent(self.state_dir, rows)
+        return done
 
     def _send_now(self, text: str, buttons=None) -> bool:
         try:

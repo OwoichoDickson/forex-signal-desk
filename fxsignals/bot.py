@@ -31,7 +31,8 @@ HELP = ("I send every signal and every change to it.\n"
         "/hold — already in a trade? Hold or close, for each running trade\n/hold GBPUSD — one pair\n"
         "/took GBPUSD 1.34059 — log that you took it now (price optional)\n/skip GBPUSD — log that you skipped it\n"
         "/open — signals you can still take\n/archive — signals past their deadline and how they ended\n/mytrades — your taken trades and results\n"
-        "/users — people who get your signals\n/remove @name — stop sending to someone\n/help — this message")
+        "/users — people who get your signals\n/remove @name — stop sending to someone\n"
+        "/delete — delete signals from your followers' chats (last 48 hours)\n/help — this message")
 FOLLOWER_HELP = ("You receive the signals from this desk here. Use them on a <b>demo account</b> — results so far are not "
                  "proven, and this is not financial advice.\n"
                  "/check — is a signal still OK to take?\n/hold — already in a trade? Hold or close\n"
@@ -189,6 +190,36 @@ def handle_access(cfg: dict, tg: Telegram, cq: dict, action: str, cid: str) -> N
     log(logger, logging.INFO, "access decided", chat=cid, action=action)
 
 
+def delete_menu(state_dir, tz: str = "UTC") -> tuple[str, Optional[list]]:
+    """What /delete can still remove from followers' chats, one button per signal (newest first)."""
+    groups: dict[str, list[dict]] = {}
+    for r in subscribers.sent(state_dir):
+        groups.setdefault(r.get("signal_id") or "other", []).append(r)
+    if not groups:
+        return ("Nothing to delete: no signal was sent to followers in the last 48 hours "
+                "(Telegram only allows deleting for 48 hours)."), None
+    rows = []
+    for sid, msgs in list(reversed(groups.items()))[:10]:
+        label = msgs[-1].get("label") or "Other messages"
+        rows.append([(f"🗑 {label} · {local_hm(msgs[0]['at'], tz)} · {len(msgs)} msg", f"del:{sid}")])
+    total = sum(len(m) for m in groups.values())
+    rows.append([(f"🗑 Everything ({total} messages)", "del:all")])
+    return ("🗑 <b>Delete for your followers</b>\nTap a signal to remove all its messages from every follower's chat "
+            "(your own chat is not touched). Only the last 48 hours can be deleted."), rows
+
+
+def handle_delete(cfg: dict, tg: Telegram, cq: dict, which: str) -> None:
+    state_dir = cfg["paths"]["state_dir"]
+    rows = [r for r in subscribers.sent(state_dir) if which == "all" or (r.get("signal_id") or "other") == which]
+    if not rows:
+        return tg.answer_callback(cq["id"], "Already deleted")
+    done = tg.delete_for_followers(rows)
+    tg.answer_callback(cq["id"], f"Deleted {done} message(s)")
+    msg = cq.get("message") or {}
+    tg.replace_buttons(msg["chat"]["id"], msg["message_id"], [[(f"✅ Deleted {done} of {len(rows)}", "noop:")]])
+    log(logger, logging.INFO, "follower messages deleted", which=which, deleted=done, of=len(rows))
+
+
 def handle_callback(cfg: dict, tg: Telegram, cq: dict) -> None:
     chat_id = str(((cq.get("message") or {}).get("chat") or {}).get("id"))
     if chat_id != str(tg.chat_id):
@@ -196,6 +227,8 @@ def handle_callback(cfg: dict, tg: Telegram, cq: dict) -> None:
     action, _, signal_id = (cq.get("data") or "").partition(":")
     if action in ("approve", "deny"):
         return handle_access(cfg, tg, cq, action, signal_id)
+    if action == "del":
+        return handle_delete(cfg, tg, cq, signal_id)
     if action not in ("took", "skip", "check"):
         return tg.answer_callback(cq["id"], "Already recorded")
     rec = next((r for r in _history(cfg).records if r.get("signal_id") == signal_id), None)
@@ -289,6 +322,9 @@ def cmd_text(cfg: dict, tg: Telegram, text: str) -> None:
         entry = subscribers.decide(state_dir, cid, "denied")  # denied, so a new /start doesn't ask you again
         tg.send_to(cid, "You won't receive signals from this bot anymore.")
         return tg.send(f"⛔ {escape(subscribers.label(cid, entry))} removed — they won't get signals anymore.")
+    if cmd == "/delete":
+        text, buttons = delete_menu(state_dir, _tz(cfg))
+        return tg.send(text, buttons)
     if cmd == "/open":
         rows = [r for r in h.records if on_board(r, now, taken_store.status(answers.get(r["signal_id"])))]
         if not rows:
@@ -331,7 +367,8 @@ def run(cfg: dict) -> None:
                     ("check", "Is each open signal still OK to take?"), ("hold", "In a trade? Hold or close"), ("took", "Log a trade you took: /took PAIR PRICE"),
                     ("skip", "Log a signal you skipped: /skip PAIR"), ("open", "Signals you can still take"), ("archive", "Past signals and results"),
                     ("mytrades", "Your taken trades and results"), ("users", "People who get your signals"),
-                    ("remove", "Stop sending to someone: /remove @name"), ("help", "How this works"))]),
+                    ("remove", "Stop sending to someone: /remove @name"),
+                    ("delete", "Delete signals from followers' chats"), ("help", "How this works"))]),
                 "scope": json.dumps({"type": "chat", "chat_id": int(tg.chat_id)})})
             tg._call("setMyCommands", {"commands": json.dumps([  # everyone else
                 {"command": "start", "description": "Ask to receive signals"}, {"command": "check", "description": "Is a signal still OK to take?"},

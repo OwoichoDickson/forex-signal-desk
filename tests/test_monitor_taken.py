@@ -86,7 +86,7 @@ def test_notify_sends_each_event_once(cfg, tmp_path, monkeypatch):
             sent.append((text, buttons))
             return True
 
-        def broadcast(self, text):
+        def broadcast(self, text, *a):
             return 0
     monkeypatch.setattr("fxsignals.scanner.Telegram", TG)
     h = hist(tmp_path)

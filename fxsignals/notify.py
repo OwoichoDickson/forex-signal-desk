@@ -145,6 +145,12 @@ class Telegram:
         subscribers.record_sent(self.state_dir, [s for s in sent if s["msg"]])
         return len(sent)
 
+    def delete_message(self, chat_id, message_id) -> bool:
+        try:
+            return bool(self._call("deleteMessage", {"chat_id": chat_id, "message_id": message_id}).get("ok"))
+        except (urllib.error.URLError, TimeoutError, OSError):
+            return False
+
     def delete_for_followers(self, rows: list[dict]) -> int:
         """Delete broadcast messages from followers' chats (Telegram allows this for 48 hours)."""
         from . import subscribers

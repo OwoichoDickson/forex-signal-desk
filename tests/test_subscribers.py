@@ -35,6 +35,9 @@ class TG:
     def replace_buttons(self, chat, mid, buttons):
         pass
 
+    def delete_message(self, chat, mid):
+        return True
+
 
 def msg(cid, text="/start", username="friend"):
     return {"chat": {"id": cid, "type": "private", "first_name": "Ana", "username": username}, "text": text}
@@ -217,3 +220,28 @@ def test_followers_cannot_use_owner_commands(tmp_path):
     assert all(t == bot.FOLLOWER_HELP for t in out) and not owner
     for word in ("/users", "/remove", "/delete", "/mytrades"):
         assert word not in bot.FOLLOWER_HELP
+
+
+def test_approval_leaves_no_trace_in_owner_chat(tmp_path):
+    from fxsignals import bot
+    subscribers.request(tmp_path, {"id": 77, "first_name": "Sam"})
+    owner, others, deleted, toasts = [], [], [], []
+
+    class TG:
+        def answer_callback(self, cid, text):
+            toasts.append(text)
+
+        def delete_message(self, chat, mid):
+            deleted.append((chat, mid))
+            return True
+
+        def send(self, *a, **k):
+            owner.append(a)
+
+        def send_to(self, cid, text, buttons=None):
+            others.append(cid)
+
+    cq = {"id": "q", "message": {"chat": {"id": 1}, "message_id": 5}}
+    bot.handle_access({"paths": {"state_dir": str(tmp_path)}}, TG(), cq, "approve", "77")
+    assert deleted == [(1, 5)] and owner == [] and others == ["77"] and toasts == ["✅ Approved: Sam"]
+    assert subscribers.approved(tmp_path) == ["77"]

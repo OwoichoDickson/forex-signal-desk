@@ -177,16 +177,14 @@ def handle_access(cfg: dict, tg: Telegram, cq: dict, action: str, cid: str) -> N
     entry = subscribers.decide(state_dir, cid, "approved" if action == "approve" else "denied")
     if entry is None:
         return tg.answer_callback(cq["id"], "Request not found")
-    who = escape(subscribers.label(cid, entry))
+    who = entry.get("name") or cid
     msg = cq.get("message") or {}
+    # leave no trace in the chat: a pop-up confirms, the request message is deleted (/users shows the list)
+    tg.answer_callback(cq["id"], f"{'✅ Approved' if action == 'approve' else '⛔ Denied'}: {who}")
+    if not tg.delete_message(msg["chat"]["id"], msg["message_id"]):  # Telegram refuses after 48 hours
+        tg.replace_buttons(msg["chat"]["id"], msg["message_id"], [[("✅ Done" if action == "approve" else "⛔ Done", "noop:")]])
     if action == "approve":
-        tg.answer_callback(cq["id"], "Approved")
-        tg.replace_buttons(msg["chat"]["id"], msg["message_id"], [[("✅ Approved", "noop:")]])
         tg.send_to(cid, "✅ You're approved — new signals will arrive here.\n\n" + FOLLOWER_HELP)
-        tg.send(f"✅ {who} will now receive your signals. /remove {cid} to stop.")
-    else:
-        tg.answer_callback(cq["id"], "Denied")
-        tg.replace_buttons(msg["chat"]["id"], msg["message_id"], [[("⛔ Denied", "noop:")]])
     log(logger, logging.INFO, "access decided", chat=cid, action=action)
 
 

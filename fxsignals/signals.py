@@ -172,7 +172,94 @@ def analyse_pair(pair: str, candles: dict[str, Optional[Candles]], quote: Option
     if "H1" in missing or "H4" in missing:
         detail = ", ".join(f"{tf} ({n} bars)" for tf, n in missing.items())
         return _wait(base, "INSUFFICIENT_DATA", f"Insufficient candle data: {detail}", tfa, inst, None, None)
-    return decide(pair, tfa, quote, fund, cfg, market_open)
+    res = decide(pair, tfa, quote, fund, cfg, market_open)
+    res["scalp"] = decide_scalp(pair, tfa, quote, fund, cfg, market_open)
+    return res
+
+
+def decide_scalp(pair: str, tfa: dict[str, TFAnalysis], quote: Optional[Quote], fund: PairFundamentals,
+                 cfg: dict, market_open: bool) -> Optional[dict[str, Any]]:
+    """Short trade for scalpers, separate from the main signal: H1 + M15 agree on direction, a fresh M5
+    break/retest/sweep confirms it, a tight stop beyond M15 structure, targets 1R/1.5R/2R, and the trade is
+    closed after ``scalp.max_hold_minutes`` whatever happens. Returns None when there is no scalp."""
+    s = cfg.get("scalp") or {}
+    if not s.get("enabled"):
+        return None
+    inst = instrument(pair)
+    m5, m15, h1, h4 = tfa.get("M5"), tfa.get("M15"), tfa.get("H1"), tfa.get("H4")
+    if None in (m5, m15, h1) or None in (m15.atr, m15.ema20, m15.rsi, m15.macd_hist, m5.atr):
+        return None
+    if fund.blackout_events or m15.bias != h1.bias or m15.bias not in ("BULLISH", "BEARISH"):
+        return None
+    bull = m15.bias == "BULLISH"
+    sgn, side = (1 if bull else -1), m15.bias
+    # M15 momentum must point the same way (not overbought/oversold)
+    if not ((50 < m15.rsi < 70) if bull else (30 < m15.rsi < 50)) or sgn * m15.macd_hist <= 0:
+        return None
+    trig = None
+    for e in m5.structure.events:
+        if e.direction == side and e.bars_ago <= s["trigger_max_bars_ago"] and e.kind in TRIGGER_POINTS:
+            if e.kind == "REJECTION" and not _near_level(e.price, [m15, h1], m15.atr, bull):
+                continue
+            if trig is None or TRIGGER_POINTS[e.kind] > TRIGGER_POINTS[trig.kind]:
+                trig = e
+    if trig is None:
+        return None
+    price = quote.last if quote and quote.last else m5.close
+    entry = (quote.ask if bull else quote.bid) if quote and (quote.ask if bull else quote.bid) else price
+    if sgn * (entry - m15.ema20) / m15.atr > s["max_extension_atr"]:
+        return None  # chasing: price already far from the M15 mean
+    sa = {**cfg["analysis"], "sl_buffer_atr": s["sl_buffer_atr"], "min_sl_atr": s["min_sl_atr"], "max_sl_atr": s["max_sl_atr"]}
+    try:
+        stop = _structural_stop(entry, m15, m5, bull, m15.atr, sa)
+    except Wait:
+        return None
+    risk = abs(entry - stop)
+    spread = (quote.ask - quote.bid) if quote and quote.ask and quote.bid else None
+    if spread is not None and risk < s["min_stop_spreads"] * spread:
+        return None  # spread would eat the scalp
+    tps = [entry + sgn * r * risk for r in s["targets_r"]]
+    # a nearby M15/H1 level before TP1 would block the move
+    obstacles = [lv.price for tf in (m15, h1) for lv in tf.structure.levels if 0 < sgn * (lv.price - entry) < sgn * (tps[0] - entry)]
+    if obstacles:
+        return None
+    score = 55 + TRIGGER_POINTS[trig.kind] + (10 if h4 is not None and h4.bias == side else 0) \
+        + (8 if (m15.adx or 0) >= cfg["analysis"]["adx_trend_min"] else 0) + (5 if m5.bias == side else 0) \
+        + (5 if spread is not None and spread <= 0.05 * risk else 0)
+    score = min(score, 90)
+    if score < s["min_confidence"]:
+        return None
+    alignment = ",".join(tf for tf in ("M5", "M15", "H1", "H4") if tf in tfa and tfa[tf].bias == side)
+    status = "ACTIVE" if market_open else "MARKET_CLOSED"
+    d1t = _d1_trend(tfa.get("D1"), bull)
+    hold = s["max_hold_minutes"]
+    return {
+        "symbol": pair, "economic_risk": fund.economic_risk, "headlines": fund.headlines, "catalyst": catalyst_text(fund, pair),
+        "style": "SCALP", "max_hold_minutes": hold, "entry_minutes": s["entry_minutes"],
+        "direction": "BUY" if bull else "SELL", "signal_type": "MARKET_ENTRY",
+        "entry_price": inst.round_price(entry), "stop_loss": inst.round_price(stop),
+        "take_profit_1": inst.round_price(tps[0]), "take_profit_2": inst.round_price(tps[1]), "take_profit_3": inst.round_price(tps[2]),
+        "risk_reward": f"1:{s['targets_r'][1]:.1f}", "confidence_score": score, "trend": side,
+        "momentum": "STRONG" if (m15.adx or 0) >= 25 else "MODERATE" if (m15.adx or 0) >= 20 else "WEAK",
+        "rsi": _r(m15.rsi, 1), "ema_20": inst.round_price(m15.ema20), "ema_50": inst.round_price(m15.ema50),
+        "atr": _r(m15.atr, inst.price_decimals + 1), "timeframe_alignment": alignment,
+        "market_structure": f"SCALP_{side}_{trig.kind}",
+        "reason": (f"SCALP {'BUY' if bull else 'SELL'}: H1 and M15 {side.lower()}, M5 {trig.kind.replace('_', ' ').lower()} "
+                   f"{trig.bars_ago * 5} min ago; stop beyond M15 structure; close within {hold} min."),
+        "status": status, "actionable": status == "ACTIVE",
+        "details": {
+            "d1_trend": d1t, "entry_basis": "ask" if bull else "bid",
+            "risk_reward_by_target": [f"1:{r:.2f}" for r in s["targets_r"]],
+            "stop_distance_pips": round(inst.to_pips(risk), 1),
+            "spread_pips": round(inst.to_pips(spread), 1) if spread is not None else None,
+            "atr_m15_pips": round(inst.to_pips(m15.atr), 1),
+            "trigger": {"kind": trig.kind, "price": inst.round_price(trig.price), "bars_ago": trig.bars_ago,
+                        "timeframe": "M5", "detail": trig.detail},
+            "surprises": fund.surprises, "upcoming_high_impact": [e.to_dict() for e in fund.upcoming_high],
+            "technicals": {tf: tfa[tf].summary(inst) for tf in ("M5", "M15", "H1") if tf in tfa},
+            "warnings": [],
+        },
+    }
 
 
 def decide(pair: str, tfa: dict[str, TFAnalysis], quote: Optional[Quote], fund: PairFundamentals,

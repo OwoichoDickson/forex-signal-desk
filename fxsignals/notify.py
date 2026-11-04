@@ -274,9 +274,13 @@ def fmt_signal(s: dict, public_url: Optional[str], tz: str = "UTC") -> str:
     status = s.get("status")
     when = "Enter now" if status == "ACTIVE" else "Pending order — waits for price" if status == "PENDING" else "Market closed — re-check at the open"
     link = f"\n<a href=\"{escape(public_url)}\">Open dashboard</a>" if public_url else ""
+    scalp = s.get("style") == "SCALP"
+    tag = "⚡ SCALP · " if scalp else ""
+    hold = (f"\n⚡ <b>Short trade: close it within {s.get('max_hold_minutes', 120)} minutes</b> of entering, "
+            f"even if no stop or target is hit." if scalp else "")
     return (
-        f"<b>{arrow} {escape(s['symbol'])}</b> — {escape(s['signal_type'].replace('_', ' '))}\n"
-        f"{when} · confidence <b>{s['confidence_score']}</b>\n"
+        f"<b>{tag}{arrow} {escape(s['symbol'])}</b> — {escape(s['signal_type'].replace('_', ' '))}\n"
+        f"{when} · confidence <b>{s['confidence_score']}</b>{hold}\n"
         f"📝 In your platform: {order_instruction(s)}\n\n"
         f"Entry: <b>{s['entry_price']}</b>\nStop loss: <b>{s['stop_loss']}</b>\n"
         f"TP1: {s['take_profit_1']}\nTP2: <b>{s['take_profit_2']}</b>\nTP3: {s['take_profit_3']}\n"
@@ -290,8 +294,11 @@ def fmt_outcome(r: dict, answer: Optional[bool] = None) -> str:
     out = r["outcome"]
     win, be = out == "WIN_TP2", out == "BREAKEVEN"
     head = "✅ WIN" if win else "➖ BREAK-EVEN" if be else "❌ LOSS" if out == "LOSS_STOP" else "⏹ CLOSED (time limit)"
+    if r.get("style") == "SCALP":
+        head = "⚡ " + head
     exit_ = ("TP2 " + str(r["take_profit_2"]) if win else f"stop at entry after TP1" if be
-             else "stop " + str(r["stop_loss"]) if out == "LOSS_STOP" else "closed")
+             else "stop " + str(r["stop_loss"]) if out == "LOSS_STOP"
+             else f"closed at {r['exit_price']} (time limit)" if r.get("exit_price") is not None else "closed")
     return (f"<b>{head} — {escape(r['symbol'])} {escape(r['direction'])}</b>{taken_tag(answer)}\n"
             f"Result: <b>{r.get('result_r'):+}R</b> · entry {r.get('fill_price')} → {exit_}\n"
             f"Signal from {escape(r['created_at'][:16].replace('T', ' '))} UTC")

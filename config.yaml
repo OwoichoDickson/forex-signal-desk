@@ -68,6 +68,20 @@ signals:
   cooldown_after_loss_hours: 4   # after a stop-out, no new signal for that pair + direction for this long
   remind_before_end_minutes: 30   # Telegram reminder this long before a signal's 'don't take after' time
 
+scalp:                           # short trades for scalpers, shown as ⚡ SCALP next to the normal signals
+  enabled: true
+  max_hold_minutes: 120          # closed after this long whatever happens (tracked as a time-limit exit)
+  entry_minutes: 15              # take it within this many minutes or not at all
+  trigger_max_bars_ago: 6        # M5 break/retest/sweep within the last 30 minutes
+  max_extension_atr: 1.0         # entry within 1 ATR(M15) of M15 EMA20 (no chasing)
+  sl_buffer_atr: 0.15            # stop beyond M15 structure + this x ATR(M15)
+  min_sl_atr: 0.4
+  max_sl_atr: 1.5
+  min_stop_spreads: 5            # stop at least 5x the spread, or costs eat the trade
+  targets_r: [1.0, 1.5, 2.0]     # TP1 / TP2 (main) / TP3 in multiples of the risk
+  min_confidence: 70
+  top_n: 5
+
 news_filter:
   blackout_minutes_before: 60    # no new trades this close to a high-impact release
   blackout_minutes_after: 15

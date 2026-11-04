@@ -97,6 +97,8 @@ def manage(rec: dict, price: Optional[float], price_at: Optional[str], now: date
         return f"🏁 <b>Finished — stopped out</b> — {sym}\nThe stop {rec['stop_loss']} was hit. If it is still open in your platform, the plan says <b>close it</b>."
     if out == "BREAKEVEN":
         return f"🏁 <b>Finished — break-even</b> — {sym}\nTP1 was reached, then price came back to the entry (the moved stop, 0R). If it is still open in your platform, the plan says <b>close it</b>."
+    if out == "TIMEOUT" and rec.get("style") == "SCALP":
+        return f"🏁 <b>Finished — scalp time limit</b> — {sym}\nNo stop or target within {rec.get('max_hold_minutes', 120)} minutes ({rec.get('result_r'):+}R). The plan says <b>close it now</b>."
     if out == "TIMEOUT":
         return f"🏁 <b>Finished — time limit</b> — {sym}\nNo stop or target after {MAX_DAYS} days ({rec.get('result_r'):+}R). The plan says <b>close it</b>."
     if out in (None, "PENDING_FILL", "NOT_FILLED") or rec.get("fill_price") is None:
@@ -112,9 +114,15 @@ def manage(rec: dict, price: Optional[float], price_at: Optional[str], now: date
         lines.append(f"Price {price} (last scan, {age} ago) · {'your' if my_price else 'the'} trade is <b>{r:+.2f}R</b> from {fill}.")
     elif rec.get("open_r") is not None:
         lines.append(f"The trade is {rec['open_r']:+}R (last scan).")
-    ends = datetime.fromisoformat(rec["created_at"]).timestamp() + MAX_DAYS * 86400
-    lines.append(f"Time limit: {local_hm(datetime.fromtimestamp(ends, now.tzinfo).isoformat(), tz)} on "
-                 f"{datetime.fromtimestamp(ends, now.tzinfo):%d %b} — close it then if no stop or target was hit.")
+    if rec.get("style") == "SCALP" and rec.get("filled_at"):
+        ends = datetime.fromisoformat(rec["filled_at"]).timestamp() + rec.get("max_hold_minutes", 120) * 60
+        left = max(0, round((ends - now.timestamp()) / 60))
+        lines.append(f"⚡ Scalp: <b>close it by {local_hm(datetime.fromtimestamp(ends, now.tzinfo).isoformat(), tz)}</b> "
+                     f"({left} min left) if no stop or target was hit.")
+    else:
+        ends = datetime.fromisoformat(rec["created_at"]).timestamp() + MAX_DAYS * 86400
+        lines.append(f"Time limit: {local_hm(datetime.fromtimestamp(ends, now.tzinfo).isoformat(), tz)} on "
+                     f"{datetime.fromtimestamp(ends, now.tzinfo):%d %b} — close it then if no stop or target was hit.")
     warns = rec.get("warnings") or []
     if warns:
         why = "; ".join(escape(w["reason"]) for w in warns[-2:])

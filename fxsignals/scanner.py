@@ -141,8 +141,13 @@ def analyse_market(cfg: dict, raw: dict, now: datetime, history: SignalHistory) 
     r = load_account(cfg)  # balance/risk entered in the dashboard override config.yaml
     book = RateBook(prices)
     min_conf, top_n = cfg["signals"]["min_confidence"], cfg["signals"]["top_n"]
+    scalps = [s for s in (res.pop("scalp", None) for res in results) if s]
     hold_back(results, history, now, cfg["signals"])
     ranked = rank_signals(results, min_conf, top_n)
+    if scalps:  # ⚡ short trades: ranked on their own, checked only against other scalps
+        sc = cfg.get("scalp") or {}
+        hold_back(scalps, history, now, cfg["signals"], style="SCALP")
+        ranked += rank_signals(scalps, sc.get("min_confidence", 70), sc.get("top_n", 5))
     for s in ranked:
         # pip value + stop pips are always stored; lots are only kept when an amount was entered
         s["position_size"] = position_size(s["symbol"], s["entry_price"], s["stop_loss"], r["account_balance"] or 100.0,
@@ -172,7 +177,7 @@ def analyse_market(cfg: dict, raw: dict, now: datetime, history: SignalHistory) 
             "track_record": history.track_record()}
 
 
-def hold_back(results: list[dict], history: SignalHistory, now: datetime, sig_cfg: dict) -> None:
+def hold_back(results: list[dict], history: SignalHistory, now: datetime, sig_cfg: dict, style: str = "INTRADAY") -> None:
     """Turn BUY/SELL results into WAIT when the pair already has a running trade, the same idea was just
     stopped out, or it is outside the trading hours. The setup is kept under details.proposed."""
     hours = sig_cfg.get("trade_hours_utc")
@@ -180,7 +185,7 @@ def hold_back(results: list[dict], history: SignalHistory, now: datetime, sig_cf
     for res in results:
         if res.get("direction") not in ("BUY", "SELL"):
             continue
-        why = history.blocked(res["symbol"], res["direction"], now, cooldown)
+        why = history.blocked(res["symbol"], res["direction"], now, cooldown, style)
         if why is None and hours and not hours[0] <= now.hour < hours[1]:
             why = ("OUTSIDE_TRADING_HOURS", f"New signals only {hours[0]:02d}:00–{hours[1]:02d}:00 UTC (London/New York); "
                                             f"the Asian session lost every trade so far")

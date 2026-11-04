@@ -146,6 +146,7 @@ a { color: var(--accent); }
           <option value="H4">H4</option><option value="D1">D1</option>
         </select>
         <select id="fDir"><option value="">All directions</option><option>BUY</option><option>SELL</option><option>WAIT</option></select>
+        <select id="fStyle"><option value="">All trade styles</option><option value="SCALP">⚡ Scalps only</option><option value="INTRADAY">Intraday only</option></select>
         <label class="small muted">Min confidence <input id="fConf" type="number" min="0" max="100" value="0" style="width:64px"></label>
         <a href="#lots" data-go="lots" class="small" id="planLink">Lot sizes: set an amount →</a>
       </div>
@@ -273,7 +274,14 @@ function sizeFor(s) {
 }
 const pip = (sym) => sym.startsWith("XAU") ? 0.1 : sym.endsWith("JPY") ? 0.01 : 0.0001;
 
-function filters() { return { pair: $("#fPair").value, tf: $("#fTf").value, dir: $("#fDir").value, conf: +$("#fConf").value || 0 }; }
+function filters() { return { pair: $("#fPair").value, tf: $("#fTf").value, dir: $("#fDir").value, conf: +$("#fConf").value || 0, style: $("#fStyle").value }; }
+// a running scalp: when the 2-hour limit ends
+const scalpClose = (s) => {
+  if (s.style !== "SCALP" || !s.filled_at || s.status !== "RUNNING") return "";
+  const end = new Date(Date.parse(s.filled_at) + (s.max_hold_minutes || 120) * 60000), left = Math.round((end - Date.now()) / 60000);
+  return `<div class="small ${left <= 15 ? "BEARISH" : "warn"}" style="padding:1px 4px;border-radius:4px;margin-top:2px">⏱ Close by ${end.toISOString().slice(11, 16)} UTC (${Math.max(0, left)} min left)</div>`;
+};
+const scalpTag = (s) => s.style === "SCALP" ? ` <span class="pill warn" title="Short trade: close within ${s.max_hold_minutes || 120} minutes of entering">⚡ Scalp</span>` : "";
 
 function renderCards() {
   const ms = report.market_summary || {};
@@ -309,7 +317,8 @@ function techRow(s, tf) {
 function renderSignals() {
   const f = filters();
   const rows = [];
-  const sigs = (report.signals || []).filter((s) => (!f.pair || s.symbol === f.pair) && (!f.dir || s.direction === f.dir) && s.confidence_score >= f.conf);
+  const sigs = (report.signals || []).filter((s) => (!f.pair || s.symbol === f.pair) && (!f.dir || s.direction === f.dir) && s.confidence_score >= f.conf
+    && (!f.style || (s.style || "INTRADAY") === f.style));
   for (const s of sigs) {
     const ps = sizeFor(s), b = (s.details || {}).score_breakdown || {};
     const since = `<div class="small muted">since ${tFmt(s.created_at)} UTC</div>${s.expires_at && s.status !== "RUNNING" ? deadlineHtml(s) : ""}`;
@@ -321,7 +330,7 @@ function renderSignals() {
     const riskAmt = ps.lots ? ps.actual_risk_amount : ps.min_lot_risk;
     const blocked = s.portfolio && !s.portfolio.allocated;
     rows.push(`<tr class="sig${bad}" data-id="${esc(s.signal_id)}"><td>${s.rank}</td>
-      <td class="c-pair"><b>${esc(s.symbol)}</b>${againstHtml(s)}${since}${note}</td>
+      <td class="c-pair"><b>${esc(s.symbol)}</b>${scalpTag(s)}${scalpClose(s)}${againstHtml(s)}${since}${note}</td>
       <td class="c-trade"><span class="pill ${s.direction}">${s.direction}</span> ${orderCell(s)}</td>
       <td class="c-levels"><table class="lv">
         <tr><td>Entry</td><td><b>${esc(s.entry_price)}</b></td></tr>
@@ -502,7 +511,7 @@ function renderHistory() {
       : h.replaced_by ? `<b>No</b><div class="small muted">a newer ${esc(h.symbol)} signal replaced it</div>`
       : `<b>No</b><div class="small muted">price never reached ${esc(h.entry_price)}</div>`;
     const r = h.result_r;
-    return `<tr style="${bg}"><td>${tFmt(h.created_at)}</td><td><b>${esc(h.symbol)}</b></td><td>${dir}</td>
+    return `<tr style="${bg}"><td>${tFmt(h.created_at)}</td><td><b>${esc(h.symbol)}</b>${scalpTag(h)}</td><td>${dir}</td>
       <td>${esc(h.signal_type.replaceAll("_", " ").toLowerCase())}</td><td>${enteredCell}</td>
       <td>${esc(h.entry_price)}</td><td>${esc(h.stop_loss)}</td><td>${esc(h.take_profit_2)}</td><td>${esc(h.confidence_score)}</td>
       <td><b style="${fg}">${esc(label)}</b>${h.tp1_hit && group !== "WIN" ? '<div class="small muted">TP1 was touched</div>' : ""}</td>
@@ -792,7 +801,7 @@ $("#scanBtn").onclick = async () => {
   const r = await fetch("/api/scan?force=1", { method: "POST" });
   if (r.status === 202 || r.status === 409) pollScan();
 };
-["#fPair", "#fTf", "#fDir", "#fConf"].forEach((id) => $(id).addEventListener("input", () => { renderSignals(); renderOutlook(); }));
+["#fPair", "#fTf", "#fDir", "#fConf", "#fStyle"].forEach((id) => $(id).addEventListener("input", () => { renderSignals(); renderOutlook(); }));
 load(); pollScan(); setInterval(load, 60000);
 </script>
 </body>

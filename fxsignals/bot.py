@@ -332,7 +332,7 @@ def cmd_text(cfg: dict, tg: Telegram, text: str) -> None:
             a = taken_store.status(answers.get(r["signal_id"]))
             mine = "✅ taken" if a is True else "❌ skipped" if a is False else "❓ not answered"
             prog = f" · now {r['open_r']:+}R" if r.get("outcome") == "OPEN" and r.get("open_r") is not None else ""
-            lines.append(f"<b>{escape(r['symbol'])} {r['direction']}</b> {escape(r['signal_type'].replace('_', ' ').lower())} "
+            lines.append(f"{'⚡ ' if r.get('style') == 'SCALP' else ''}<b>{escape(r['symbol'])} {r['direction']}</b> {escape(r['signal_type'].replace('_', ' ').lower())} "
                          f"{r['entry_price']} · {display_status(r, now)}{prog} · until {local_hm(r.get('expires_at'), _tz(cfg))} · {mine}")
         return tg.send("📋 <b>Open signals</b>\n" + "\n".join(lines) + "\n\nPast their deadline: /archive")
     if cmd == "/archive":

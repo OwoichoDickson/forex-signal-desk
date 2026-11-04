@@ -18,6 +18,11 @@ logger = logging.getLogger("fxsignals.history")
 OPEN_STATES = {"ACTIVE", "PENDING", "MARKET_CLOSED"}
 
 
+def style_of(r: dict) -> str:
+    """SCALP (short, closed after max_hold_minutes) or INTRADAY (the normal signals)."""
+    return r.get("style") or "INTRADAY"
+
+
 def _h1_agrees(h1, t: int, lo: float, hi: float) -> bool:
     """Does the H1 bar containing this M5 bar span its high and low? Unknown hour -> trust the M5 bar."""
     for j in range(len(h1.t) - 1, -1, -1):
@@ -152,8 +157,15 @@ class SignalHistory:
             risk = abs(fill - r["stop_loss"]) or 1e-12
             at_entry = False  # stop moved to the entry (TP1 reached on an earlier bar)
             h1 = (confirm or {}).get(r["symbol"])
+            close_by = c.t[fill_i] + r["max_hold_minutes"] * 60 if r.get("max_hold_minutes") else None
             for i in range(fill_i, len(c.t)):
                 lo, hi = c.l[i], c.h[i]
+                if close_by is not None and c.t[i] >= close_by:
+                    # scalp time limit: closed at the open of the first bar after it (no stop or target before)
+                    px = c.o[i]
+                    r.update(outcome="TIMEOUT", outcome_at=datetime.fromtimestamp(c.t[i], timezone.utc).isoformat(),
+                             result_r=round(((px - fill) if buy else (fill - px)) / risk, 2), exit_price=px)
+                    break
                 if h1 is not None and not _h1_agrees(h1, c.t[i], lo, hi):
                     log(logger, logging.WARNING, "M5 bar ignored: H1 does not confirm it", symbol=r["symbol"],
                         bar=datetime.fromtimestamp(c.t[i], timezone.utc).isoformat(), low=lo, high=hi)
@@ -217,7 +229,7 @@ class SignalHistory:
                 continue
             if effective_status(r, now) not in OPEN_STATES:
                 continue
-            key = (r["symbol"], r["direction"])
+            key = (style_of(r), r["symbol"], r["direction"])
             old = newest.get(key)
             if old is not None:
                 old.update(status="SUPERSEDED", closed_at=now.isoformat(), actionable=False,
@@ -236,10 +248,11 @@ class SignalHistory:
         for r in self.records:
             if r.get("status") not in OPEN_STATES:
                 continue
-            if r.get("outcome") in ("LOSS_STOP", "WIN_TP2", "BREAKEVEN"):
+            if r.get("outcome") in ("LOSS_STOP", "WIN_TP2", "BREAKEVEN", "TIMEOUT"):
                 hit = r["outcome"] == "WIN_TP2"
                 why = ("TP2 reached" if hit else "stop at entry reached after TP1 (break-even)"
-                       if r["outcome"] == "BREAKEVEN" else "stop-loss reached")
+                       if r["outcome"] == "BREAKEVEN" else "time limit reached" if r["outcome"] == "TIMEOUT"
+                       else "stop-loss reached")
                 r.update(status="TARGET_HIT" if hit else "INVALIDATED", closed_at=now.isoformat(), actionable=False,
                          close_reason=f"{why} at {r['outcome_at']}")
                 changed.append(r)
@@ -268,11 +281,12 @@ class SignalHistory:
                 changed.append(r)
         return changed
 
-    def blocked(self, symbol: str, direction: str, now: datetime, cooldown_hours: float) -> Optional[tuple[str, str]]:
+    def blocked(self, symbol: str, direction: str, now: datetime, cooldown_hours: float,
+                style: str = "INTRADAY") -> Optional[tuple[str, str]]:
         """Why a new signal on this pair must not be published: a trade on it is still running (one idea is
         never sent twice), or the same idea was stopped out within the cooldown. Returns (code, reason)."""
         for r in self.records:
-            if r["symbol"] != symbol:
+            if r["symbol"] != symbol or style_of(r) != style:
                 continue
             if r.get("outcome") == "OPEN":
                 return ("ALREADY_RUNNING", f"A {r['direction']} trade from {r['created_at'][11:16]} UTC on {symbol} is still "
@@ -287,11 +301,13 @@ class SignalHistory:
     def register(self, sig: dict, now: datetime) -> dict:
         """Add a new signal or merge it into an equivalent open one (no duplicates)."""
         key = f"{sig['symbol']}|{sig['direction']}|{sig['signal_type']}"
+        if style_of(sig) != "INTRADAY":
+            key = f"{style_of(sig)}|{key}"
         tol = 0.5 * (sig.get("atr") or 0)
         for r in self.records:
             if r.get("status") not in OPEN_STATES or effective_status(r, now) not in OPEN_STATES:
                 continue
-            if r["symbol"] == sig["symbol"] and r["direction"] != sig["direction"]:
+            if r["symbol"] == sig["symbol"] and r["direction"] != sig["direction"] and style_of(r) == style_of(sig):
                 r.update(status="SUPERSEDED", closed_at=now.isoformat(), close_reason="opposite signal generated", actionable=False)
                 continue
             if r.get("key") == key and abs(r["entry_price"] - sig["entry_price"]) <= tol:
@@ -300,7 +316,7 @@ class SignalHistory:
                 r.update({**sig, **keep, "updated_at": now.isoformat(), "scan_count": r.get("scan_count", 1) + 1})
                 return {**r, "duplicate_of_existing": True}
         start = now if is_fx_open(now) else next_open(now)
-        minutes = self.expiry.get(sig["signal_type"], 60)
+        minutes = sig.get("entry_minutes") or self.expiry.get(sig["signal_type"], 60)
         rec = {
             **sig,
             "signal_id": uuid.uuid4().hex[:12],

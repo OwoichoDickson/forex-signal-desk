@@ -7,7 +7,7 @@ against, back on track, TP1 (move stop to break-even), structural/news warnings,
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from .history import CLOSED_OUTCOMES, FINAL_OUTCOMES, OPEN_STATES, effective_status
@@ -83,7 +83,7 @@ def events_for(rec: dict, answer: Optional[bool], url: Optional[str], sent: froz
     end = rec.get("expires_at")
     left = (datetime.fromisoformat(end) - now).total_seconds() / 60 if end else None
     waiting = rec.get("fill_price") is None and rec.get("outcome") in (None, "PENDING_FILL") and effective_status(rec, now) in OPEN_STATES
-    if waiting and left is not None and 0 < left <= remind_minutes and answer is not False:
+    if waiting and left is not None and 0 < left <= remind_minutes and answer is not False and rec.get("style") != "SCALP":
         todo = ("If your order isn't filled by then, cancel it at your broker." if answer
                 else "Not taken yet? Tap 🔎 to check first — after that time, don't take it.")
         ev.append(("ending", f"⏰ {sym}{tag}\nEnds at <b>{local_hm(end, tz)}</b> (in {in_words(left)}). {todo}",
@@ -106,6 +106,11 @@ def events_for(rec: dict, answer: Optional[bool], url: Optional[str], sent: froz
             ev.append(("r_pos1", f"✅ {sym}{tag}\nGoing as planned: now <b>{r:+}R</b> in profit. TP1 {rec['take_profit_1']}, TP2 {rec['take_profit_2']}.", None))
         if r >= 0 and "r_neg" in sent:
             ev.append(("recovered", f"✅ {sym}{tag}\nBack on track: now <b>{r:+}R</b>.", None))
+    if rec.get("style") == "SCALP" and rec.get("outcome") == "OPEN" and rec.get("filled_at") and not archived:
+        close_by = datetime.fromisoformat(rec["filled_at"]) + timedelta(minutes=rec.get("max_hold_minutes", 120))
+        if now >= close_by - timedelta(minutes=15):
+            ev.append(("scalp_close_soon", f"⏰ ⚡ {sym}{tag}\nScalp time limit at <b>{local_hm(close_by.isoformat(), tz)}</b> — "
+                                           f"close it then if the stop or target hasn't been hit.", None))
     if rec.get("tp1_hit") and rec.get("outcome") in ("OPEN", "WIN_TP2", "BREAKEVEN") and not archived:
         ev.append(("tp1", fmt_event(rec, "breakeven", f"TP1 {rec['take_profit_1']} reached. Moving the stop to the entry "
                                      f"({rec.get('fill_price')}) protects the trade from turning into a loss.", answer), None))

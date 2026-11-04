@@ -59,7 +59,34 @@ button:disabled { opacity: .5; cursor: default; }
 .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 16px; }
 .notice { padding: 10px 12px; border-radius: 8px; }
 a { color: var(--accent); }
-@media (max-width: 640px) { header, main { padding-left: 16px; padding-right: 16px; } .grid2 { grid-template-columns: 1fr; } }
+/* tabs: one focused view at a time instead of one very long page */
+.tabs { flex-basis: 100%; display: flex; gap: 2px; overflow-x: auto; margin: 2px 0 -16px; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tabs button { background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 9px 12px 10px;
+  color: var(--muted); font-weight: 600; white-space: nowrap; cursor: pointer; }
+.tabs button:hover { color: var(--text); }
+.tabs button.active { color: var(--text); border-bottom-color: var(--accent); }
+.badge { display: inline-block; min-width: 18px; margin-left: 4px; padding: 0 6px; border-radius: 999px; background: var(--wait-bg);
+  color: var(--text); font-size: 11px; line-height: 18px; text-align: center; }
+.badge:empty { display: none; }
+.badge.alert { background: var(--sell-bg); color: var(--sell); }
+[data-tab][hidden] { display: none !important; }
+/* phones: compact summary cards, and each open signal as a stacked card instead of a 1100px-wide row */
+@media (max-width: 760px) {
+  .cards { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .card { padding: 8px 10px; } .card .k { font-size: 11px; } .card .v { font-size: 17px; overflow-wrap: anywhere; }
+  #sigTable thead { display: none; }
+  #sigTable, #sigTable > tbody { display: block; }
+  #sigTable > tbody > tr.sig { display: grid; grid-template-columns: auto 1fr; gap: 10px 18px; padding: 14px 10px; border-bottom: 1px solid var(--line); }
+  #sigTable > tbody > tr.sig > td { display: block; border: 0; padding: 0; min-width: 0; max-width: none; }
+  #sigTable > tbody > tr.sig > td:first-child { display: none; }
+  #sigTable .c-pair, #sigTable .c-trade, #sigTable .c-size, #sigTable .c-status, #sigTable .c-taken { grid-column: 1 / -1; }
+  #sigTable > tbody > tr.detail, #sigTable > tbody > tr.detail > td { display: block; }
+  #sigTable > tbody > tr.detail > td:first-child { display: none; }
+}
+.tab-intro { margin: -4px 0 0; }
+@media (max-width: 640px) { header, main { padding-left: 16px; padding-right: 16px; } .grid2 { grid-template-columns: 1fr; }
+  .tabs { margin-left: -16px; margin-right: -16px; padding: 0 10px; } }
 </style>
 </head>
 <body>
@@ -73,17 +100,20 @@ a { color: var(--accent); }
     <span id="scanState" class="small muted"></span>
     <button id="scanBtn" class="primary">Run scan</button>
   </div>
+  <nav class="tabs" id="tabs" role="tablist" aria-label="Sections">
+    <button data-go="signals" role="tab">Signals<span class="badge" id="bSignals"></span></button>
+    <button data-go="results" role="tab">Results</button>
+    <button data-go="market" role="tab">Market</button>
+    <button data-go="why" role="tab">Why no signal</button>
+    <button data-go="lots" role="tab">Lot size</button>
+    <button data-go="backtest" role="tab">Backtest</button>
+  </nav>
 </header>
 <main>
-  <nav class="filters small" id="quickLinks" style="gap:8px">
-    <span class="muted">Jump to:</span>
-    <a href="#openSignals">Open signals</a> · <a href="#resultsPanel"><b>Archive</b></a> · <a href="#outlookPanel">Market outlook</a> ·
-    <a href="#chartPanel">Chart</a> · <a href="#backtestPanel">Backtest</a> · <a href="#accountPanel">Lot-size planner</a>
-  </nav>
   <div id="notices"></div>
-  <section class="cards" id="cards"></section>
+  <section class="cards" id="cards" data-tab="signals"></section>
 
-  <section class="panel" id="accountPanel">
+  <section class="panel" id="accountPanel" data-tab="lots">
     <div class="filters" style="justify-content: space-between; margin-bottom: 10px;">
       <h2 style="margin:0">Position-size planner (optional)</h2>
       <span class="small muted" id="acctSource"></span>
@@ -106,7 +136,7 @@ a { color: var(--accent); }
     <div class="cards" id="acctCards" style="margin-top:12px"></div>
   </section>
 
-  <section class="panel" id="openSignals">
+  <section class="panel" id="openSignals" data-tab="signals">
     <div class="filters" style="justify-content: space-between; margin-bottom: 10px;">
       <h2 style="margin:0">Top opportunities — every signal still valid</h2>
       <div class="filters">
@@ -117,16 +147,17 @@ a { color: var(--accent); }
         </select>
         <select id="fDir"><option value="">All directions</option><option>BUY</option><option>SELL</option><option>WAIT</option></select>
         <label class="small muted">Min confidence <input id="fConf" type="number" min="0" max="100" value="0" style="width:64px"></label>
+        <a href="#lots" data-go="lots" class="small" id="planLink">Lot sizes: set an amount →</a>
       </div>
     </div>
     <table id="sigTable"><thead><tr>
       <th>#</th><th>Pair</th><th>Trade (in your platform)</th><th>Levels</th><th>R:R · confidence</th>
       <th>Size &amp; risk</th><th>Status</th><th>Did you take it?</th>
     </tr></thead><tbody></tbody></table>
-    <div id="noSignals" class="muted small" style="padding:10px 4px; display:none">No valid signal right now. The generator does not force trades — signals past their deadline are in the Archive.</div>
+    <div id="noSignals" class="muted small" style="padding:10px 4px; display:none">No valid signal right now. The generator does not force trades — signals past their deadline are in <a href="#results" data-go="results">Results</a>.</div>
   </section>
 
-  <section class="panel" id="outlookPanel">
+  <section class="panel" id="outlookPanel" data-tab="market">
     <div class="filters" style="justify-content: space-between; margin-bottom: 10px;">
       <h2 style="margin:0">Market outlook — every pair, all timeframes</h2>
       <span class="small muted">Lean = weighted vote of D1/H4/H1/M15/M5 bias. Click a row for its chart. A lean is not a trade signal.</span>
@@ -136,7 +167,7 @@ a { color: var(--accent); }
     </tr></thead><tbody></tbody></table>
   </section>
 
-  <section class="panel" id="chartPanel">
+  <section class="panel" id="chartPanel" data-tab="market">
     <div class="filters" style="justify-content: space-between; margin-bottom: 10px;">
       <h2 style="margin:0">Chart</h2>
       <div class="filters">
@@ -149,23 +180,17 @@ a { color: var(--accent); }
     <div id="chartNote" class="small muted" style="margin-top:6px"></div>
   </section>
 
-  <div class="grid2">
-    <section class="panel">
-      <h2>Currency strength</h2>
-      <div id="strength" class="small"></div>
-    </section>
-    <section class="panel">
-      <h2>Track record (live, from published levels)</h2>
-      <div id="track" class="small"></div>
-    </section>
-  </div>
+  <section class="panel" data-tab="market">
+    <h2>Currency strength</h2>
+    <div id="strength" class="small"></div>
+  </section>
 
-  <section class="panel" id="backtestPanel">
+  <section class="panel" id="backtestPanel" data-tab="backtest">
     <h2>Weekly backtest — old (strict) vs new (adaptive) rules</h2>
     <div id="backtest" class="small"></div>
   </section>
 
-  <section class="panel">
+  <section class="panel" data-tab="why">
     <div class="filters" style="justify-content: space-between; margin-bottom: 10px;">
       <h2 style="margin:0">Why no signal — which rule says WAIT</h2>
       <select id="bHours"><option value="24">Last 24 hours</option><option value="168">Last 7 days</option><option value="720">Last 30 days</option></select>
@@ -173,12 +198,12 @@ a { color: var(--accent); }
     <div id="blockers" class="small"></div>
   </section>
 
-  <section class="panel">
+  <section class="panel" data-tab="why">
     <h2>Watchlist — WAIT</h2>
     <table id="waitTable"><thead><tr><th>Pair</th><th>Bias</th><th>Reason code</th><th>Score</th><th>M15</th><th>H1</th><th>H4</th><th>D1</th><th>Reason</th></tr></thead><tbody></tbody></table>
   </section>
 
-  <div class="grid2">
+  <div class="grid2" data-tab="market">
     <section class="panel">
       <h2>Live prices</h2>
       <table id="priceTable"><thead><tr><th>Pair</th><th>Last</th><th>Bid</th><th>Ask</th><th>Spread</th><th>Chg %</th><th>Day high</th><th>Day low</th><th>Prev close</th><th>Feed</th></tr></thead><tbody></tbody></table>
@@ -189,12 +214,17 @@ a { color: var(--accent); }
     </section>
   </div>
 
-  <section class="panel">
+  <section class="panel" data-tab="market">
     <h2>News catalysts</h2>
     <div id="news" class="small"></div>
   </section>
 
-  <section class="panel" id="resultsPanel">
+  <section class="panel" data-tab="results">
+    <h2>Track record (live, from published levels)</h2>
+    <div id="track" class="small"></div>
+  </section>
+
+  <section class="panel" id="resultsPanel" data-tab="results">
     <div class="filters" style="justify-content: space-between; margin-bottom: 10px;">
       <h2 style="margin:0">Archive — past signals and results</h2>
       <div class="filters">
@@ -211,7 +241,7 @@ a { color: var(--accent); }
     <table id="histTable"><thead><tr><th>Generated (UTC)</th><th>Pair</th><th>Direction</th><th>Type</th><th>Entered?</th><th>Entry</th><th>Stop</th><th>TP2</th><th>Conf</th><th>Result</th><th>R</th><th>Finished (UTC)</th><th>You</th></tr></thead><tbody></tbody></table>
   </section>
 
-  <section class="panel small muted" id="limitations"></section>
+  <section class="panel small muted" id="limitations" data-tab="backtest"></section>
 </main>
 <!-- loaded in the background so a slow CDN can never hold up the dashboard; the chart draws once it arrives -->
 <script async src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"
@@ -250,10 +280,14 @@ function renderCards() {
   const sigs = report.signals || [];
   const act = sigs.filter((s) => s.status === "ACTIVE").length;
   const cards = [
-    ["Market", report.market_status || "—"], ["Feed", (report.feed || {}).mode || "—"], ["Pairs analysed", ms.pairs_analysed ?? "—"],
+    ["Market", report.market_status || "—"], ["Feed", ({ REAL_TIME: "Live", DELAYED: "Delayed" })[(report.feed || {}).mode] || (report.feed || {}).mode || "—"], ["Pairs analysed", ms.pairs_analysed ?? "—"],
     ["Open BUY signals", sigs.filter((s) => s.direction === "BUY").length], ["Open SELL signals", sigs.filter((s) => s.direction === "SELL").length],
     ["WAIT", ms.waiting_pairs ?? 0], ["Actionable now", act], ["Running trades", sigs.filter((s) => s.status === "RUNNING").length], ["Going against", sigs.filter((s) => (tradeR(s) ?? 0) < 0).length],
   ];
+  const against = sigs.filter((s) => (tradeR(s) ?? 0) < 0).length;
+  $("#bSignals").textContent = sigs.length || "";
+  $("#bSignals").classList.toggle("alert", against > 0);
+  $("#bSignals").title = against ? `${against} going against you` : "";
   $("#cards").innerHTML = cards.map(([k, v]) => `<div class="card"><div class="k">${esc(k)}</div><div class="v ${k.startsWith("BUY") ? "BULLISH" : k.startsWith("SELL") ? "BEARISH" : ""}">${esc(v)}</div></div>`).join("");
   $("#subtitle").textContent = report.scanned_at ? `Last scan ${tFmt(report.scanned_at)} UTC · ${report.data_source} · ${report.scan?.duration_s}s` : "No scan yet — click Run scan";
   const n = [];
@@ -619,7 +653,7 @@ async function drawChart() {
   const el = $("#chart"); el.innerHTML = "";
   if (!t) { $("#chartNote").textContent = `No ${tf} data for ${pair}.`; return; }
   const dark = matchMedia("(prefers-color-scheme: dark)").matches;
-  chart = LightweightCharts.createChart(el, { height: 420, layout: { background: { color: "transparent" }, textColor: dark ? "#c8ced6" : "#333" },
+  chart = LightweightCharts.createChart(el, { autoSize: true, layout: { background: { color: "transparent" }, textColor: dark ? "#c8ced6" : "#333" },
     grid: { vertLines: { color: dark ? "#222831" : "#eef0f3" }, horzLines: { color: dark ? "#222831" : "#eef0f3" } },
     timeScale: { timeVisible: true, secondsVisible: false }, rightPriceScale: { borderVisible: false } });
   const s = chart.addCandlestickSeries({ upColor: "#12805c", downColor: "#c4314b", borderVisible: false, wickUpColor: "#12805c", wickDownColor: "#c4314b",
@@ -690,10 +724,38 @@ async function load() {
   chartCache = {};
   // each section renders independently: one failure must not blank the whole page
   for (const f of [renderBlockers, renderBacktest, renderCards, renderAccount, renderPrices, renderSignals, renderOutlook,
-                   renderStrength, renderTrack, renderCalendar, renderNews, renderHistory, drawChart]) {
+                   renderStrength, renderTrack, renderCalendar, renderNews, renderHistory, drawChart, syncPlanLink]) {
     try { await f(); } catch (err) { console.error(f.name, err); }
   }
 }
+
+function syncPlanLink() {
+  const src = $("#acctSource").textContent.trim();
+  $("#planLink").textContent = src && !src.startsWith("Private") ? `${src} · change` : "Lot sizes: set an amount →";
+}
+
+const TABS = ["signals", "results", "market", "why", "lots", "backtest"];
+function showTab(name, save = true) {
+  if (!TABS.includes(name)) name = "signals";  // also old #anchor links
+  document.querySelectorAll("main [data-tab]").forEach((el) => { el.hidden = el.dataset.tab !== name; });
+  document.querySelectorAll("#tabs [data-go]").forEach((b) => {
+    b.classList.toggle("active", b.dataset.go === name);
+    b.setAttribute("aria-selected", String(b.dataset.go === name));
+  });
+  // the chart was laid out at zero width while its tab was hidden: redraw it once visible
+  if (name === "market" && typeof drawChart === "function") requestAnimationFrame(() => drawChart().catch(() => { }));
+  if (save) {
+    window.history.replaceState(null, "", "#" + name);
+    try { localStorage.setItem("fxsig.tab", name); } catch { }
+    window.scrollTo({ top: 0 });
+  }
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-go]");
+  if (b) { e.preventDefault(); showTab(b.dataset.go); }
+});
+window.addEventListener("hashchange", () => showTab(location.hash.slice(1), false));
+showTab(location.hash.slice(1) || (() => { try { return localStorage.getItem("fxsig.tab"); } catch { return null; } })(), false);
 
 let schedule = null;
 function tickTimer() {

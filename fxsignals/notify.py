@@ -287,11 +287,13 @@ def fmt_signal(s: dict, public_url: Optional[str], tz: str = "UTC") -> str:
 
 
 def fmt_outcome(r: dict, answer: Optional[bool] = None) -> str:
-    win = r["outcome"] == "WIN_TP2"
-    head = "✅ WIN" if win else "❌ LOSS" if r["outcome"] == "LOSS_STOP" else "⏹ CLOSED (time limit)"
+    out = r["outcome"]
+    win, be = out == "WIN_TP2", out == "BREAKEVEN"
+    head = "✅ WIN" if win else "➖ BREAK-EVEN" if be else "❌ LOSS" if out == "LOSS_STOP" else "⏹ CLOSED (time limit)"
+    exit_ = ("TP2 " + str(r["take_profit_2"]) if win else f"stop at entry after TP1" if be
+             else "stop " + str(r["stop_loss"]) if out == "LOSS_STOP" else "closed")
     return (f"<b>{head} — {escape(r['symbol'])} {escape(r['direction'])}</b>{taken_tag(answer)}\n"
-            f"Result: <b>{r.get('result_r'):+}R</b> · entry {r.get('fill_price')} → "
-            f"{'TP2 ' + str(r['take_profit_2']) if win else 'stop ' + str(r['stop_loss']) if r['outcome'] == 'LOSS_STOP' else 'closed'}\n"
+            f"Result: <b>{r.get('result_r'):+}R</b> · entry {r.get('fill_price')} → {exit_}\n"
             f"Signal from {escape(r['created_at'][:16].replace('T', ' '))} UTC")
 
 

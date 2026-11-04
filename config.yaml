@@ -35,7 +35,8 @@ analysis:
   rsi_overbought: 70
   rsi_oversold: 30
   adx_trend_min: 20
-  max_extension_atr: 1.5         # market entry only if price within 1.5 ATR(H1) of H1 EMA20
+  max_extension_atr: 1.0         # market entry only if price within 1.0 ATR(H1) of H1 EMA20 (1.5 chased too often)
+  market_entry_min_adx: 20       # market entry only when H1 ADX shows a real trend; otherwise a pending order
   trigger_max_bars_ago: {M15: 8, H1: 4}
   sl_buffer_atr: 0.25            # stop placed this far beyond the structural level
   min_sl_atr: 0.5
@@ -61,6 +62,8 @@ signals:
   preferred_risk_reward: 3.0
   top_n: 10
   expiry_minutes: {MARKET_ENTRY: 60, BUY_LIMIT: 240, SELL_LIMIT: 240, BUY_STOP: 240, SELL_STOP: 240}
+  trade_hours_utc: [7, 16]       # new signals only 07:00–16:00 UTC (London/New York); [0, 24] = always
+  cooldown_after_loss_hours: 4   # after a stop-out, no new signal for that pair + direction for this long
   remind_before_end_minutes: 30   # Telegram reminder this long before a signal's 'don't take after' time
 
 news_filter:

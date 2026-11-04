@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 
-from .history import FINAL_OUTCOMES, OPEN_STATES, effective_status
+from .history import CLOSED_OUTCOMES, FINAL_OUTCOMES, OPEN_STATES, effective_status
 from .notify import (check_button, escape, fmt_event, fmt_filled, fmt_outcome, fmt_signal, in_words, local_hm,
                      taken_tag, took_buttons)
 
@@ -106,14 +106,14 @@ def events_for(rec: dict, answer: Optional[bool], url: Optional[str], sent: froz
             ev.append(("r_pos1", f"✅ {sym}{tag}\nGoing as planned: now <b>{r:+}R</b> in profit. TP1 {rec['take_profit_1']}, TP2 {rec['take_profit_2']}.", None))
         if r >= 0 and "r_neg" in sent:
             ev.append(("recovered", f"✅ {sym}{tag}\nBack on track: now <b>{r:+}R</b>.", None))
-    if rec.get("tp1_hit") and rec.get("outcome") in ("OPEN", "WIN_TP2") and not archived:
+    if rec.get("tp1_hit") and rec.get("outcome") in ("OPEN", "WIN_TP2", "BREAKEVEN") and not archived:
         ev.append(("tp1", fmt_event(rec, "breakeven", f"TP1 {rec['take_profit_1']} reached. Moving the stop to the entry "
                                      f"({rec.get('fill_price')}) protects the trade from turning into a loss.", answer), None))
     for w in ([] if archived else rec.get("warnings", [])):
         ev.append((f"warn:{w['kind']}", fmt_event(rec, w["kind"], w["reason"] + " — consider closing early or tightening the stop.", answer), None))
     final = _final_message(rec, sym, tag, answer)
     if final:
-        if answer is True and rec.get("fill_price") is None and rec.get("outcome") not in ("WIN_TP2", "LOSS_STOP", "TIMEOUT"):
+        if answer is True and rec.get("fill_price") is None and rec.get("outcome") not in CLOSED_OUTCOMES:
             final += ("\n⛔ <b>Don't take it anymore.</b> You marked it as taken — if you placed a pending order "
                       "at your broker, <b>cancel it now</b>; if you entered at market, manage it with the stop "
                       f"{rec['stop_loss']}.")
@@ -125,7 +125,7 @@ def events_for(rec: dict, answer: Optional[bool], url: Optional[str], sent: froz
 
 def _final_message(rec: dict, sym: str, tag: str, answer: Optional[bool]) -> Optional[str]:
     out, status = rec.get("outcome"), rec.get("status")
-    if out in ("WIN_TP2", "LOSS_STOP", "TIMEOUT"):
+    if out in CLOSED_OUTCOMES:
         return fmt_outcome(rec, answer)
     if status == "CANCELLED":
         return fmt_event(rec, "cancelled", rec.get("cancel_reason") or "setup no longer valid", answer)

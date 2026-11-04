@@ -361,7 +361,7 @@ function renderNews() {
 }
 
 const RESULT = {
-  WIN_TP2: ["✅ Won", "WIN"], LOSS_STOP: ["❌ Lost", "LOSS"], TIMEOUT: ["⏹ Closed (time limit)", "OPEN"],
+  WIN_TP2: ["✅ Won", "WIN"], LOSS_STOP: ["❌ Lost", "LOSS"], BREAKEVEN: ["➖ Break-even (stop at entry after TP1)", "OPEN"], TIMEOUT: ["⏹ Closed (time limit)", "OPEN"],
   OPEN: ["Running", "OPEN"], PENDING_FILL: ["— Did not enter", "WAITING"], NOT_FILLED: ["— Did not enter", "WAITING"],
 };
 // anything finished without a fill (expired, superseded, invalidated before entry) = did not enter
@@ -443,7 +443,7 @@ function renderHistory() {
   const entered = past.filter((h) => h.fill_price != null).length;
   $("#resultCards").innerHTML = card("Signals generated", t.total_generated ?? history.length)
     + card("Entered", entered) + card("Did not enter", past.length - entered)
-    + card("✅ Won (TP2)", t.wins_tp2 ?? 0, "BULLISH") + card("❌ Lost (stop)", t.losses_stop ?? 0, "BEARISH")
+    + card("✅ Won (TP2)", t.wins_tp2 ?? 0, "BULLISH") + card("❌ Lost (stop)", t.losses_stop ?? 0, "BEARISH") + card("➖ Break-even", t.breakeven ?? 0, "")
     + card("Win rate", t.win_rate_pct == null ? "—" : t.win_rate_pct + "%") + card("Total R", t.total_r ?? 0, (t.total_r || 0) >= 0 ? "BULLISH" : "BEARISH")
     + card("Still open (top of page)", history.length - past.length);
   const m = historyMine || {};
@@ -544,7 +544,7 @@ function renderStrength() {
 function renderTrack() {
   const t = report.track_record;
   if (!t) { $("#track").innerHTML = `<span class="muted">Available after the next scan.</span>`; return; }
-  const c = [["Closed", t.closed_trades], ["TP2 wins", t.wins_tp2], ["Stopped", t.losses_stop], ["Win rate", t.win_rate_pct == null ? "—" : t.win_rate_pct + "%"],
+  const c = [["Closed", t.closed_trades], ["TP2 wins", t.wins_tp2], ["Stopped", t.losses_stop], ["Break-even", t.breakeven ?? 0], ["Win rate", t.win_rate_pct == null ? "—" : t.win_rate_pct + "%"],
     ["Avg R", t.avg_r ?? "—"], ["Total R", t.total_r], ["Open", t.open], ["Awaiting fill", t.awaiting_fill], ["Not filled", t.not_filled]];
   $("#track").innerHTML = `<div class="cards">${c.map(([k, v]) => `<div class="card"><div class="k">${k}</div><div class="v" style="font-size:18px">${esc(v)}</div></div>`).join("")}</div><div class="muted" style="margin-top:8px">${esc(t.note)}</div>`;
 }

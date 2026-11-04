@@ -135,11 +135,13 @@ def analyse_market(cfg: dict, raw: dict, now: datetime, history: SignalHistory) 
         results.append(res)
 
     m5 = {p: raw["candles"][p].get("M5") for p in pairs}
-    history.refresh(prices, now, bars=m5)
+    h1 = {p: raw["candles"][p].get("H1") for p in pairs if raw["candles"][p].get("H1") is not None}
+    history.refresh(prices, now, bars=m5, confirm=h1)
     review_open_signals(history, results, now)  # cancel broken pending setups, flag warnings on running trades
     r = load_account(cfg)  # balance/risk entered in the dashboard override config.yaml
     book = RateBook(prices)
     min_conf, top_n = cfg["signals"]["min_confidence"], cfg["signals"]["top_n"]
+    hold_back(results, history, now, cfg["signals"])
     ranked = rank_signals(results, min_conf, top_n)
     for s in ranked:
         # pip value + stop pips are always stored; lots are only kept when an amount was entered
@@ -168,6 +170,27 @@ def analyse_market(cfg: dict, raw: dict, now: datetime, history: SignalHistory) 
             "currency_strength": strength,
             "strength_pairings": strength_pairings(strength, pairs, outlooks),
             "track_record": history.track_record()}
+
+
+def hold_back(results: list[dict], history: SignalHistory, now: datetime, sig_cfg: dict) -> None:
+    """Turn BUY/SELL results into WAIT when the pair already has a running trade, the same idea was just
+    stopped out, or it is outside the trading hours. The setup is kept under details.proposed."""
+    hours = sig_cfg.get("trade_hours_utc")
+    cooldown = float(sig_cfg.get("cooldown_after_loss_hours", 0))
+    for res in results:
+        if res.get("direction") not in ("BUY", "SELL"):
+            continue
+        why = history.blocked(res["symbol"], res["direction"], now, cooldown)
+        if why is None and hours and not hours[0] <= now.hour < hours[1]:
+            why = ("OUTSIDE_TRADING_HOURS", f"New signals only {hours[0]:02d}:00–{hours[1]:02d}:00 UTC (London/New York); "
+                                            f"the Asian session lost every trade so far")
+        if why is None:
+            continue
+        proposed = {k: res.get(k) for k in ("direction", "signal_type", "entry_price", "stop_loss", "take_profit_1",
+                                             "take_profit_2", "take_profit_3", "risk_reward", "confidence_score")}
+        res["details"] = {**(res.get("details") or {}), "proposed": proposed}
+        res.update(direction="WAIT", wait_code=why[0], reason=why[1],
+                   bias="BULLISH" if proposed["direction"] == "BUY" else "BEARISH")
 
 
 def _round(v, d):

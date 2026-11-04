@@ -189,3 +189,13 @@ def test_end_to_end_on_synthetic_candles_never_contradicts_trend(cfg, helpers):
     assert r["timeframe_bias" if r["direction"] == "WAIT" else "trend"] is not None
     if r["direction"] == "WAIT":
         assert r["timeframe_bias"]["H1"] == "BULLISH"
+
+
+def test_no_enter_now_in_a_weak_trend(cfg, helpers):
+    r = decide("EURUSD", bull_setup(helpers, adx=15.0), QUOTE, NOFUND, cfg, True)
+    assert r.get("signal_type") != "MARKET_ENTRY"  # ADX below market_entry_min_adx: pending order or wait
+
+
+def test_no_enter_now_when_price_chased_away_from_ema20(cfg, helpers):
+    r = decide("EURUSD", bull_setup(helpers, ema20=1.1000 - 1.2 * 0.0010), QUOTE, NOFUND, cfg, True)
+    assert r.get("signal_type") != "MARKET_ENTRY"  # 1.2 ATR above H1 EMA20 > max_extension_atr 1.0

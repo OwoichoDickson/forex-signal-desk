@@ -49,7 +49,7 @@ def test_every_change_produces_one_update(tmp_path):
     h = hist(tmp_path)
     rec = h.register(dict(MARKET), T0)
     r = h.records[0]
-    keys = lambda sent=frozenset(): [k for k, *_ in events_for(r, None, None, sent)]
+    keys = lambda sent=frozenset(): [k for k, *_ in events_for(r, None, None, sent, T0 + timedelta(minutes=5))]
     assert keys() == ["new"]
     r.update(outcome="OPEN", fill_price=0.834, open_r=-0.6)
     assert "r_neg" in keys() and "filled" not in keys()  # market entries fill at once: no second question

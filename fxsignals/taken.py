@@ -91,7 +91,7 @@ def status(entry: Optional[dict]) -> Optional[bool]:
 
 def my_track_record(history_records: list[dict], taken: dict[str, dict]) -> dict:
     mine = [r for r in history_records if status(taken.get(r.get("signal_id"))) is True]
-    done = [r for r in mine if r.get("outcome") in ("WIN_TP2", "LOSS_STOP", "TIMEOUT")]
+    done = [r for r in mine if r.get("outcome") in ("WIN_TP2", "LOSS_STOP", "BREAKEVEN", "TIMEOUT")]
     rs = [r.get("result_r") or 0.0 for r in done]
     wins = sum(1 for r in done if r["outcome"] == "WIN_TP2")
     return {
@@ -99,6 +99,7 @@ def my_track_record(history_records: list[dict], taken: dict[str, dict]) -> dict
         "skipped": sum(1 for r in history_records if status(taken.get(r.get("signal_id"))) is False),
         "unanswered": sum(1 for r in history_records if status(taken.get(r.get("signal_id"))) is None),
         "closed": len(done), "wins": wins, "losses": sum(1 for r in done if r["outcome"] == "LOSS_STOP"),
+        "breakeven": sum(1 for r in done if r["outcome"] == "BREAKEVEN"),
         "win_rate_pct": round(100 * wins / len(done), 1) if done else None,
         "total_r": round(sum(rs), 2),
         "open": sum(1 for r in mine if r.get("outcome") == "OPEN"),

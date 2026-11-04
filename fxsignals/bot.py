@@ -96,7 +96,7 @@ def hold_reply(cfg: dict, h: SignalHistory, parts: list[str], now: datetime, ans
     return top + "\n\n".join(msgs) + "\n\n<i>What the signal's plan says — not financial advice.</i>"
 
 
-ARCHIVE_LABEL = {"WIN_TP2": "✅ won", "LOSS_STOP": "❌ lost", "TIMEOUT": "⏹ time limit", "NOT_FILLED": "— not entered"}
+ARCHIVE_LABEL = {"WIN_TP2": "✅ won", "LOSS_STOP": "❌ lost", "BREAKEVEN": "➖ break-even", "TIMEOUT": "⏹ time limit", "NOT_FILLED": "— not entered"}
 
 
 def archive_text(h: SignalHistory, now: datetime, answers: Optional[dict] = None, pair: Optional[str] = None,

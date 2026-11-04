@@ -364,7 +364,8 @@ def _build_plan(inst: Instrument, price: float, quote: Optional[Quote], h1: TFAn
     label = ""
     side = "BULLISH" if bull else "BEARISH"
     ob, ob_tf = None, None
-    if trigger and extension <= a["max_extension_atr"]:
+    # enter-now only close to H1 EMA20 (no chasing) and in a real trend (ADX); otherwise fall back to a pending order
+    if trigger and extension <= a["max_extension_atr"] and (h1.adx or 0) >= a.get("market_entry_min_adx", 0):
         signal_type = "MARKET_ENTRY"
         entry = (quote.ask if bull else quote.bid) if quote and (quote.ask if bull else quote.bid) else price
         ob, ob_tf = _tapped_order_block([h1, h4], bull, a)
@@ -408,7 +409,8 @@ def _build_plan(inst: Instrument, price: float, quote: Optional[Quote], h1: TFAn
             label = f"{'BULLISH' if bull else 'BEARISH'}_PULLBACK_TO_{'DEMAND' if k == 'zone' and bull else 'SUPPLY' if k == 'zone' else 'LEVEL'}"
             trigger = None
     if signal_type is None:
-        why = "price extended from H1 EMA20" if trigger else "no confirmed entry trigger"
+        why = ("trend too weak for an enter-now (H1 ADX below minimum)" if trigger and extension <= a["max_extension_atr"]
+               else "price extended from H1 EMA20" if trigger else "no confirmed entry trigger")
         raise Wait(f"Trend valid but {why}, and no structural pullback/breakout level for a pending order", "NO_TRIGGER")
 
     stop = _structural_stop(entry, h1, m15, bull, atr, a, ob)

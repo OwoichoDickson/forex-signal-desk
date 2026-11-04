@@ -95,6 +95,8 @@ def manage(rec: dict, price: Optional[float], price_at: Optional[str], now: date
         return f"🏁 <b>Finished — target reached</b> — {sym}\nTP2 {rec['take_profit_2']} was hit ({rec.get('result_r'):+}R). If it is still open in your platform, the plan says <b>close it</b>."
     if out == "LOSS_STOP":
         return f"🏁 <b>Finished — stopped out</b> — {sym}\nThe stop {rec['stop_loss']} was hit. If it is still open in your platform, the plan says <b>close it</b>."
+    if out == "BREAKEVEN":
+        return f"🏁 <b>Finished — break-even</b> — {sym}\nTP1 was reached, then price came back to the entry (the moved stop, 0R). If it is still open in your platform, the plan says <b>close it</b>."
     if out == "TIMEOUT":
         return f"🏁 <b>Finished — time limit</b> — {sym}\nNo stop or target after {MAX_DAYS} days ({rec.get('result_r'):+}R). The plan says <b>close it</b>."
     if out in (None, "PENDING_FILL", "NOT_FILLED") or rec.get("fill_price") is None:

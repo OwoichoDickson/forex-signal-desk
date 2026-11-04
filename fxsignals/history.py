@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 import uuid
@@ -9,9 +10,23 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
+from .logging_setup import log
 from .market_hours import is_fx_open, next_open
 
+logger = logging.getLogger("fxsignals.history")
+
 OPEN_STATES = {"ACTIVE", "PENDING", "MARKET_CLOSED"}
+
+
+def _h1_agrees(h1, t: int, lo: float, hi: float) -> bool:
+    """Does the H1 bar containing this M5 bar span its high and low? Unknown hour -> trust the M5 bar."""
+    for j in range(len(h1.t) - 1, -1, -1):
+        if h1.t[j] <= t < h1.t[j] + 3600:
+            tol = 1e-9 + 0.0002 * h1.c[j]  # tiny feed differences between the two loads
+            return h1.l[j] - tol <= lo and hi <= h1.h[j] + tol
+        if h1.t[j] + 3600 <= t:
+            return True
+    return True
 
 
 def _parse(ts: str) -> datetime:
@@ -28,7 +43,8 @@ def effective_status(sig: dict, now: datetime) -> str:
     return status
 
 
-FINAL_OUTCOMES = {"WIN_TP2", "LOSS_STOP", "TIMEOUT", "NOT_FILLED"}
+FINAL_OUTCOMES = {"WIN_TP2", "LOSS_STOP", "BREAKEVEN", "TIMEOUT", "NOT_FILLED"}
+CLOSED_OUTCOMES = ("WIN_TP2", "LOSS_STOP", "BREAKEVEN", "TIMEOUT")  # entered and finished
 
 
 def still_valid(rec: dict, now: datetime) -> bool:
@@ -85,11 +101,14 @@ class SignalHistory:
     def open_records(self, now: datetime) -> list[dict]:
         return [r for r in self.records if effective_status(r, now) in OPEN_STATES]
 
-    def track_outcomes(self, bars: dict, now: datetime, max_days: int = 5) -> None:
+    def track_outcomes(self, bars: dict, now: datetime, max_days: int = 5, confirm: Optional[dict] = None) -> None:
         """Follow every signal on M5 candles: fill, then stop vs TP2 (main target), first touch wins.
 
-        A bar touching both the stop and the target counts as a stop (conservative). TP1/TP3 touches
-        are recorded. Pending orders never filled before expiry are NOT_FILLED. This measures whether
+        A bar touching both the stop and the target counts as a stop (conservative). Once TP1 is reached
+        the plan moves the stop to the entry, so from the next bar on the stop is the fill price and a
+        return to it is BREAKEVEN (0R) instead of a full loss. TP1/TP3 touches are recorded.
+        ``confirm`` (H1 candles per pair, loaded separately) must also reach a stop/target an M5 bar touches:
+        a bad M5 bar (e.g. another symbol's price caught while the chart switched) is ignored. Pending orders never filled before expiry are NOT_FILLED. This measures whether
         the published levels worked; it ignores spread/slippage after entry.
         """
         for r in self.records:
@@ -131,22 +150,31 @@ class SignalHistory:
             r["outcome"] = "OPEN"
             fill = r["fill_price"]
             risk = abs(fill - r["stop_loss"]) or 1e-12
+            at_entry = False  # stop moved to the entry (TP1 reached on an earlier bar)
+            h1 = (confirm or {}).get(r["symbol"])
             for i in range(fill_i, len(c.t)):
                 lo, hi = c.l[i], c.h[i]
+                if h1 is not None and not _h1_agrees(h1, c.t[i], lo, hi):
+                    log(logger, logging.WARNING, "M5 bar ignored: H1 does not confirm it", symbol=r["symbol"],
+                        bar=datetime.fromtimestamp(c.t[i], timezone.utc).isoformat(), low=lo, high=hi)
+                    continue
                 fav = hi if buy else lo
+                stop = fill if at_entry else r["stop_loss"]
+                stop_hit = (lo <= stop) if buy else (hi >= stop)
+                tp2_hit = (hi >= r["take_profit_2"]) if buy else (lo <= r["take_profit_2"])
                 if (fav >= r["take_profit_1"]) if buy else (fav <= r["take_profit_1"]):
                     r["tp1_hit"] = True
                 if (fav >= r["take_profit_3"]) if buy else (fav <= r["take_profit_3"]):
                     r["tp3_hit"] = True
-                stop_hit = (lo <= r["stop_loss"]) if buy else (hi >= r["stop_loss"])
-                tp2_hit = (hi >= r["take_profit_2"]) if buy else (lo <= r["take_profit_2"])
                 if stop_hit or tp2_hit:
                     win = tp2_hit and not stop_hit
-                    exit_px = r["take_profit_2"] if win else r["stop_loss"]
-                    r.update(outcome="WIN_TP2" if win else "LOSS_STOP",
+                    exit_px = r["take_profit_2"] if win else stop
+                    r.update(outcome="WIN_TP2" if win else "BREAKEVEN" if at_entry else "LOSS_STOP",
                              outcome_at=datetime.fromtimestamp(c.t[i], timezone.utc).isoformat(),
                              result_r=round(((exit_px - fill) if buy else (fill - exit_px)) / risk, 2))
                     break
+                if r.get("tp1_hit"):
+                    at_entry = True
             else:
                 if now.timestamp() - created > max_days * 86400:
                     last = c.c[-1]
@@ -157,7 +185,7 @@ class SignalHistory:
                     r["open_r"] = round(((last - fill) if buy else (fill - last)) / risk, 2)
 
     def track_record(self) -> dict:
-        done = [r for r in self.records if r.get("outcome") in ("WIN_TP2", "LOSS_STOP", "TIMEOUT")]
+        done = [r for r in self.records if r.get("outcome") in CLOSED_OUTCOMES]
         rs = [r.get("result_r") or 0.0 for r in done]
         wins = sum(1 for r in done if r["outcome"] == "WIN_TP2")
         n = len(done)
@@ -165,6 +193,7 @@ class SignalHistory:
             "closed_trades": n,
             "wins_tp2": wins,
             "losses_stop": sum(1 for r in done if r["outcome"] == "LOSS_STOP"),
+            "breakeven": sum(1 for r in done if r["outcome"] == "BREAKEVEN"),
             "timeouts": sum(1 for r in done if r["outcome"] == "TIMEOUT"),
             "win_rate_pct": round(100 * wins / n, 1) if n else None,
             "avg_r": round(sum(rs) / n, 2) if n else None,
@@ -173,7 +202,8 @@ class SignalHistory:
             "open": sum(1 for r in self.records if r.get("outcome") == "OPEN"),
             "awaiting_fill": sum(1 for r in self.records if r.get("outcome") == "PENDING_FILL"),
             "not_filled": sum(1 for r in self.records if r.get("outcome") == "NOT_FILLED"),
-            "note": ("Live track record of published levels (stop vs TP2, first touch, no costs after entry). "
+            "note": ("Live track record of published levels (stop vs TP2, first touch, stop moved to entry after TP1, "
+                     "no costs after entry). "
                      + ("Fewer than 30 closed trades — not yet meaningful." if n < 30 else "")).strip(),
         }
 
@@ -197,18 +227,21 @@ class SignalHistory:
             newest[key] = r
         return replaced
 
-    def refresh(self, prices: dict[str, float], now: datetime, bars: Optional[dict] = None) -> list[dict]:
-        """Expire / invalidate open signals using M5 candles (when given) and the latest prices."""
+    def refresh(self, prices: dict[str, float], now: datetime, bars: Optional[dict] = None,
+                confirm: Optional[dict] = None) -> list[dict]:
+        """Expire / invalidate open signals using M5 candles (when given, checked against H1) and the latest prices."""
         if bars:
-            self.track_outcomes(bars, now)
+            self.track_outcomes(bars, now, confirm=confirm)
         changed = self.supersede_older(now)
         for r in self.records:
             if r.get("status") not in OPEN_STATES:
                 continue
-            if r.get("outcome") in ("LOSS_STOP", "WIN_TP2"):
+            if r.get("outcome") in ("LOSS_STOP", "WIN_TP2", "BREAKEVEN"):
                 hit = r["outcome"] == "WIN_TP2"
+                why = ("TP2 reached" if hit else "stop at entry reached after TP1 (break-even)"
+                       if r["outcome"] == "BREAKEVEN" else "stop-loss reached")
                 r.update(status="TARGET_HIT" if hit else "INVALIDATED", closed_at=now.isoformat(), actionable=False,
-                         close_reason=f"{'TP2 reached' if hit else 'stop-loss reached'} at {r['outcome_at']}")
+                         close_reason=f"{why} at {r['outcome_at']}")
                 changed.append(r)
                 continue
             if r.get("outcome") == "OPEN" and r.get("tp1_hit") and r["signal_type"] == "MARKET_ENTRY":
@@ -234,6 +267,22 @@ class SignalHistory:
                 r.update(status=new, closed_at=now.isoformat(), close_reason=why, actionable=False)
                 changed.append(r)
         return changed
+
+    def blocked(self, symbol: str, direction: str, now: datetime, cooldown_hours: float) -> Optional[tuple[str, str]]:
+        """Why a new signal on this pair must not be published: a trade on it is still running (one idea is
+        never sent twice), or the same idea was stopped out within the cooldown. Returns (code, reason)."""
+        for r in self.records:
+            if r["symbol"] != symbol:
+                continue
+            if r.get("outcome") == "OPEN":
+                return ("ALREADY_RUNNING", f"A {r['direction']} trade from {r['created_at'][11:16]} UTC on {symbol} is still "
+                                           f"running — no new signal until it reaches its stop or target")
+            if (r["direction"] == direction and r.get("outcome") == "LOSS_STOP" and r.get("outcome_at")
+                    and now - _parse(r["outcome_at"]) < timedelta(hours=cooldown_hours)):
+                until = _parse(r["outcome_at"]) + timedelta(hours=cooldown_hours)
+                return ("COOLDOWN_AFTER_LOSS", f"The last {symbol} {direction} was stopped out at {r['outcome_at'][11:16]} UTC — "
+                                               f"no new {direction} until {until:%H:%M} UTC")
+        return None
 
     def register(self, sig: dict, now: datetime) -> dict:
         """Add a new signal or merge it into an equivalent open one (no duplicates)."""

@@ -179,6 +179,28 @@ def cmd_backtest(cfg, args) -> int:
     return 0
 
 
+def cmd_lab(cfg, args) -> int:
+    from .lab import run_lab
+    res = run_lab(cfg, args.pairs or all_pairs(cfg), refresh=args.refresh)
+    p = res["period"]
+    print(f"History {p['from'][:10]} → {p['to'][:10]} · walk-forward split {p['split'][:10]} · costs {res['costs']}\n")
+    row = lambda s: (f"{s['trades']:>6} {str(s['win_rate_pct']):>6}% {str(s['expectancy_r']):>8} {s['total_r']:>8} "
+                     f"{str(s['profit_factor']):>6} {s['max_drawdown_r']:>7}")
+    print(f"{'rule set':<34}{'trades':>6} {'win':>7} {'avg R':>8} {'total R':>8} {'PF':>6} {'max DD':>7}   avg R 1st / 2nd half")
+    for name, r in res["rulesets"].items():
+        print(f"{name:<34}{row(r['overall'])}   {r['first_half']['expectancy_r']} / {r['second_half']['expectancy_r']}")
+    c = res["setup_cut_walk_forward"]
+    print(f"\nSetups cut (lost in the first half): {', '.join(c['setups_cut']) or 'none'}")
+    print(f"  second half before cut: {row(c['before_cut']['second_half'])}")
+    print(f"  second half after cut:  {row(c['after_cut']['second_half'])}")
+    for dim in ("setup", "type", "direction", "daily_trend_agree", "hour_utc", "score", "h1_adx"):
+        print(f"\nCurrent rules by {dim}:")
+        for k, s in res["current_rules_by"][dim].items():
+            print(f"  {k:<44}{row(s)}   {s['first_half']} / {s['second_half']}")
+    print(f"\nLimits: {res['limitations'][0]}\nFull results: {res['_path']}")
+    return 0
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="fxsignals", description="Forex signal generator (analysis only, no trading).")
     p.add_argument("--config", help="path to config.yaml")
@@ -192,6 +214,9 @@ def main(argv=None) -> int:
     r.add_argument("--interval", type=int, help="minutes between scans (default from config)")
     sub.add_parser("show", help="print the latest report")
     sub.add_parser("dashboard", help="start the web dashboard")
+    lb = sub.add_parser("lab", help="strategy lab: which rules and setups make money (walk-forward, ~10 months)")
+    lb.add_argument("--pairs", nargs="*")
+    lb.add_argument("--refresh", action="store_true", help="reload history from TradingView instead of the cache")
     b = sub.add_parser("backtest", help="replay strict vs adaptive rules on months of TradingView history")
     b.add_argument("--pairs", nargs="*")
     b.add_argument("--h1-bars", type=int, help="H1 bars of history to load (default 5000 ≈ 10 months)")
@@ -201,5 +226,5 @@ def main(argv=None) -> int:
     cfg = load_config(args.config)
     setup_logging(cfg["paths"]["log_dir"], cfg["logging"]["level"])
     return {"health": cmd_health, "scan": cmd_scan, "run": cmd_run, "show": cmd_show,
-            "dashboard": cmd_dashboard, "backtest": cmd_backtest,
+            "dashboard": cmd_dashboard, "backtest": cmd_backtest, "lab": cmd_lab,
             "telegram-setup": cmd_telegram_setup, "telegram-bot": cmd_telegram_bot}[args.cmd](cfg, args)

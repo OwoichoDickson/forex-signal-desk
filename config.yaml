@@ -37,6 +37,8 @@ analysis:
   adx_trend_min: 20
   max_extension_atr: 1.0         # market entry only if price within 1.0 ATR(H1) of H1 EMA20 (1.5 chased too often)
   market_entry_min_adx: 20       # market entry only when H1 ADX shows a real trend; otherwise a pending order
+  d1_trend_filter: shadow        # strict: BUY only if up over 1 AND 3 months (SELL: down over both); loose: either;
+                                 # shadow: never blocks, records with/against in details.d1_trend; off
   trigger_max_bars_ago: {M15: 8, H1: 4}
   sl_buffer_atr: 0.25            # stop placed this far beyond the structural level
   min_sl_atr: 0.5

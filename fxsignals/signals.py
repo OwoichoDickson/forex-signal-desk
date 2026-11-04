@@ -52,6 +52,8 @@ class TFAnalysis:
     bias: str
     votes: int
     last_t: int = 0
+    ret_1m: Optional[float] = None  # D1 only: % change over ~1 month (21 trading days)
+    ret_3m: Optional[float] = None  # D1 only: % change over ~3 months (63 trading days)
 
     def summary(self, inst: Instrument) -> dict:
         r = inst.round_price
@@ -65,6 +67,7 @@ class TFAnalysis:
             "vwap_tick_volume": r(self.vwap),
             "structure_trend": self.structure.trend, "swing_labels": self.structure.swing_labels,
             "consolidating": self.structure.consolidating,
+            "return_1m_pct": _r(self.ret_1m, 2), "return_3m_pct": _r(self.ret_3m, 2),
             "recent_events": [
                 {"kind": e.kind, "direction": e.direction, "price": r(e.price), "bars_ago": e.bars_ago, "detail": e.detail}
                 for e in sorted(self.structure.events, key=lambda e: e.bars_ago)[:4]
@@ -106,6 +109,9 @@ def analyse_timeframe(c: Candles, cfg: dict) -> TFAnalysis:
         bb_upper=ind.last(bb.upper), bb_middle=ind.last(bb.middle), bb_lower=ind.last(bb.lower),
         vwap=ind.last(vwap), structure=rep, bias="NEUTRAL", votes=0,
     )
+    if c.tf == "D1":
+        t.ret_1m = (closes[-1] / closes[-22] - 1) * 100 if len(closes) > 21 else None
+        t.ret_3m = (closes[-1] / closes[-64] - 1) * 100 if len(closes) > 63 else None
     t.bias, t.votes = timeframe_bias(t)
     return t
 
@@ -196,6 +202,8 @@ def decide(pair: str, tfa: dict[str, TFAnalysis], quote: Optional[Quote], fund: 
         if fund.blackout_events:
             e = fund.blackout_events[0]
             raise Wait(f"High-impact {e.currency} '{e.title}' at {e.date:%H:%M} UTC — no new trades inside the news window", "NEWS_BLACKOUT")
+        d1t = _d1_trend(d1, bull)
+        _d1_trend_check(d1t, bull, a.get("d1_trend_filter", "strict"))
         plan = _build_plan(inst, price, quote, h1, h4, d1, m15, bull, a, cfg["signals"])
         # Pullback entries (order block / limit at structure) are judged on H4 momentum: during a healthy
         # pullback the H1 oscillators point the other way by definition. Breakout entries keep strict H1 rules.
@@ -246,6 +254,7 @@ def decide(pair: str, tfa: dict[str, TFAnalysis], quote: Optional[Quote], fund: 
         "status": status,
         "actionable": status == "ACTIVE",
         "details": {
+            "d1_trend": d1t,
             "entry_basis": "ask" if bull and quote and quote.ask and plan.signal_type == "MARKET_ENTRY" else
                            "bid" if (not bull) and quote and quote.bid and plan.signal_type == "MARKET_ENTRY" else "level",
             "risk_reward_by_target": [f"1:{x:.2f}" for x in plan.rr],
@@ -267,6 +276,26 @@ def decide(pair: str, tfa: dict[str, TFAnalysis], quote: Optional[Quote], fund: 
             "warnings": _warnings(market_open, d1, lean, quote),
         },
     }
+
+
+def _d1_trend(d1: Optional[TFAnalysis], bull: bool) -> Optional[dict]:
+    """How the trade sits against the slow trend (time-series momentum, the best-documented FX effect):
+    the pair's change over ~1 and ~3 months and how many of the two point the trade's way."""
+    if d1 is None or d1.ret_1m is None or d1.ret_3m is None:
+        return None
+    sgn = 1 if bull else -1
+    agree = int(sgn * d1.ret_1m > 0) + int(sgn * d1.ret_3m > 0)
+    return {"return_1m_pct": round(d1.ret_1m, 2), "return_3m_pct": round(d1.ret_3m, 2), "agree": agree,
+            "label": {2: "with the daily trend", 1: "mixed daily trend", 0: "against the daily trend"}[agree]}
+
+
+def _d1_trend_check(d1t: Optional[dict], bull: bool, mode: str) -> None:
+    """strict: BUY only if up over ~1 AND ~3 months (SELL: down over both); loose: at least one;
+    shadow/off: never blocks (shadow still records the comparison in details.d1_trend)."""
+    if d1t is None or mode not in ("strict", "loose") or d1t["agree"] == 2 or (mode == "loose" and d1t["agree"] == 1):
+        return
+    raise Wait(f"{'BUY' if bull else 'SELL'} {d1t['label']}: the pair is {d1t['return_1m_pct']:+.2f}% over 1 month and "
+               f"{d1t['return_3m_pct']:+.2f}% over 3 months (needs both {'up' if bull else 'down'})", "D1_TREND_AGAINST")
 
 
 def _direction(h1: TFAnalysis, h4: TFAnalysis) -> Optional[str]:

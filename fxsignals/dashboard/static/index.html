@@ -329,7 +329,7 @@ function renderSignals() {
         <tr><td>TP1</td><td>${esc(s.take_profit_1)}</td></tr>
         <tr><td>TP2</td><td class="BULLISH"><b>${esc(s.take_profit_2)}</b></td></tr>
         <tr><td>TP3</td><td>${esc(s.take_profit_3)}</td></tr></table></td>
-      <td class="c-rr"><b>${esc(s.risk_reward)}</b><div class="small muted" style="margin-top:6px">confidence ${s.confidence_score}</div><span class="bar" style="margin-left:0">
+      <td class="c-rr"><b>${esc(s.risk_reward)}</b>${(s.details || {}).d1_trend ? `<div class="small ${s.details.d1_trend.agree === 2 ? "BULLISH" : s.details.d1_trend.agree === 0 ? "BEARISH" : "muted"}" title="1 month ${s.details.d1_trend.return_1m_pct}% · 3 months ${s.details.d1_trend.return_3m_pct}%">${esc(s.details.d1_trend.label)}</div>` : ""}<div class="small muted" style="margin-top:6px">confidence ${s.confidence_score}</div><span class="bar" style="margin-left:0">
         <i style="width:${s.confidence_score}%"></i></span></td>
       <td class="c-size">${lot}${riskAmt != null ? ` · risk <b>${esc(riskAmt)}</b>` : ""}
         ${!ps.lots && ps.micro_lots ? `<div class="small">micro/cent account: <b>${esc(ps.micro_lots)}</b> lot</div>` : ""}

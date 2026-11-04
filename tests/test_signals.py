@@ -199,3 +199,31 @@ def test_no_enter_now_in_a_weak_trend(cfg, helpers):
 def test_no_enter_now_when_price_chased_away_from_ema20(cfg, helpers):
     r = decide("EURUSD", bull_setup(helpers, ema20=1.1000 - 1.2 * 0.0010), QUOTE, NOFUND, cfg, True)
     assert r.get("signal_type") != "MARKET_ENTRY"  # 1.2 ATR above H1 EMA20 > max_extension_atr 1.0
+
+
+def _with_d1(helpers, ret_1m, ret_3m):
+    t = bull_setup(helpers)
+    t["D1"].ret_1m, t["D1"].ret_3m = ret_1m, ret_3m
+    return t
+
+
+def test_buy_needs_the_daily_trend_up(cfg, helpers):
+    cfg = {**cfg, "analysis": {**cfg["analysis"], "d1_trend_filter": "strict"}}
+    assert decide("EURUSD", _with_d1(helpers, 1.2, 3.0), QUOTE, NOFUND, cfg, True)["direction"] == "BUY"
+    for r1, r3 in ((-0.4, 3.0), (1.2, -2.0), (-1.0, -2.0)):
+        r = decide("EURUSD", _with_d1(helpers, r1, r3), QUOTE, NOFUND, cfg, True)
+        assert r["direction"] == "WAIT" and r["wait_code"] == "D1_TREND_AGAINST", (r1, r3)
+
+
+def test_daily_trend_filter_modes(cfg, helpers):
+    loose = {**cfg, "analysis": {**cfg["analysis"], "d1_trend_filter": "loose"}}
+    assert decide("EURUSD", _with_d1(helpers, -0.4, 3.0), QUOTE, NOFUND, loose, True)["direction"] == "BUY"
+    assert decide("EURUSD", _with_d1(helpers, -0.4, -3.0), QUOTE, NOFUND, loose, True)["direction"] == "WAIT"
+    off = {**cfg, "analysis": {**cfg["analysis"], "d1_trend_filter": "off"}}
+    assert decide("EURUSD", _with_d1(helpers, -1.0, -2.0), QUOTE, NOFUND, off, True)["direction"] == "BUY"
+
+
+def test_shadow_mode_records_but_never_blocks(cfg, helpers):
+    shadow = {**cfg, "analysis": {**cfg["analysis"], "d1_trend_filter": "shadow"}}
+    r = decide("EURUSD", _with_d1(helpers, -1.0, -2.0), QUOTE, NOFUND, shadow, True)
+    assert r["direction"] == "BUY" and r["details"]["d1_trend"]["label"] == "against the daily trend"

@@ -67,6 +67,14 @@ signals:
   trade_hours_utc: [7, 16]       # new signals only 07:00–16:00 UTC (London/New York); [0, 24] = always
   cooldown_after_loss_hours: 4   # after a stop-out, no new signal for that pair + direction for this long
   remind_before_end_minutes: 30   # Telegram reminder this long before a signal's 'don't take after' time
+  disabled_setups:               # lost money in the strategy lab (python -m fxsignals lab, 4 Nov 2026); [] = all on
+    - BEARISH_BREAKOUT_RETEST
+    - BEARISH_BREAKOUT_RETEST_AT_ORDER_BLOCK
+    - BEARISH_PULLBACK_TO_LEVEL
+    - BEARISH_PULLBACK_TO_ORDER_BLOCK
+    - BULLISH_BREAKOUT_RETEST_AT_ORDER_BLOCK
+    - BULLISH_PULLBACK_TO_LEVEL
+    - BULLISH_PULLBACK_TO_ORDER_BLOCK
 
 scalp:                           # short trades for scalpers, shown as ⚡ SCALP next to the normal signals
   enabled: true

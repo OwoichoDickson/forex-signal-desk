@@ -179,8 +179,9 @@ def analyse_market(cfg: dict, raw: dict, now: datetime, history: SignalHistory) 
 
 def hold_back(results: list[dict], history: SignalHistory, now: datetime, sig_cfg: dict, style: str = "INTRADAY") -> None:
     """Turn BUY/SELL results into WAIT when the pair already has a running trade, the same idea was just
-    stopped out, or it is outside the trading hours. The setup is kept under details.proposed."""
+    stopped out, it is outside the trading hours, or its setup is switched off. The setup is kept under details.proposed."""
     hours = sig_cfg.get("trade_hours_utc")
+    off = set(sig_cfg.get("disabled_setups") or []) if style == "INTRADAY" else set()
     cooldown = float(sig_cfg.get("cooldown_after_loss_hours", 0))
     for res in results:
         if res.get("direction") not in ("BUY", "SELL"):
@@ -189,6 +190,9 @@ def hold_back(results: list[dict], history: SignalHistory, now: datetime, sig_cf
         if why is None and hours and not hours[0] <= now.hour < hours[1]:
             why = ("OUTSIDE_TRADING_HOURS", f"New signals only {hours[0]:02d}:00–{hours[1]:02d}:00 UTC (London/New York); "
                                             f"the Asian session lost every trade so far")
+        if why is None and res.get("market_structure") in off:
+            why = ("SETUP_SWITCHED_OFF", f"{res['market_structure']} is switched off: it lost money in the strategy lab "
+                                         f"(walk-forward test on ~10 months of history, after costs)")
         if why is None:
             continue
         proposed = {k: res.get(k) for k in ("direction", "signal_type", "entry_price", "stop_loss", "take_profit_1",

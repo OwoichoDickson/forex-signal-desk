@@ -94,3 +94,15 @@ def test_bad_m5_bar_not_confirmed_by_h1_is_ignored(tmp_path):
     h1 = _h1([(1.1, 1.1012, 1.0900, 1.1004)], t0)  # hour confirms the drop: a real stop-out
     h.refresh({}, WED + timedelta(minutes=10), bars={"EURUSD": m5}, confirm={"EURUSD": h1})
     assert h.records[0]["outcome"] == "LOSS_STOP"
+
+
+def test_switched_off_setups_wait_but_scalps_are_unaffected(tmp_path):
+    h = _hist(tmp_path)
+    cfg = {**CFG, "disabled_setups": ["BULLISH_PULLBACK_TO_LEVEL"]}
+    day = datetime(2026, 11, 5, 9, 0, tzinfo=timezone.utc)
+    res = [{**_buy(), "market_structure": "BULLISH_PULLBACK_TO_LEVEL"}, {**_buy("GBPUSD"), "market_structure": "BULLISH_BOS"}]
+    hold_back(res, h, day, cfg)
+    assert res[0]["wait_code"] == "SETUP_SWITCHED_OFF" and res[1]["direction"] == "BUY"
+    scalp = [{**_buy("USDJPY"), "market_structure": "BULLISH_PULLBACK_TO_LEVEL"}]
+    hold_back(scalp, h, day, cfg, style="SCALP")
+    assert scalp[0]["direction"] == "BUY"

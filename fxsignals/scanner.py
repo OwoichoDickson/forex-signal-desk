@@ -19,6 +19,7 @@ from .logging_setup import log
 from .market_data import TradingViewData, data_freshness
 from .market_hours import is_instrument_open, market_status
 from .mcp_client import TradingViewMCP
+from . import qm_shadow
 from . import taken as taken_store
 from .monitor import events_for, review_open_signals
 from .notify import Telegram
@@ -137,6 +138,13 @@ def analyse_market(cfg: dict, raw: dict, now: datetime, history: SignalHistory) 
     m5 = {p: raw["candles"][p].get("M5") for p in pairs}
     h1 = {p: raw["candles"][p].get("H1") for p in pairs if raw["candles"][p].get("H1") is not None}
     history.refresh(prices, now, bars=m5, confirm=h1)
+    if (cfg.get("qm_shadow") or {}).get("enabled", True):
+        try:  # QMR in shadow mode: recorded and tracked, never sent
+            closed = lambda tf: {p: c.closed_only(now.timestamp()) for p in pairs
+                                 if (c := raw["candles"][p].get(tf)) is not None}
+            qm_shadow.update(cfg["paths"]["state_dir"], closed("H1"), closed("H4"), cfg, now)
+        except Exception as e:  # noqa: BLE001 - a shadow test must never stop a scan
+            log(logger, logging.WARNING, "QM shadow update failed", error=str(e))
     review_open_signals(history, results, now)  # cancel broken pending setups, flag warnings on running trades
     r = load_account(cfg)  # balance/risk entered in the dashboard override config.yaml
     book = RateBook(prices)

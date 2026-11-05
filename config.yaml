@@ -76,6 +76,9 @@ signals:
     - BULLISH_PULLBACK_TO_LEVEL
     - BULLISH_PULLBACK_TO_ORDER_BLOCK
 
+qm_shadow:                       # QMR (Quasimodo reversal): recorded + tracked, never sent (lost in the lab); see 'lab --qm'
+  enabled: true
+
 scalp:                           # short trades for scalpers, shown as ⚡ SCALP next to the normal signals
   enabled: true
   max_hold_minutes: 120          # closed after this long whatever happens (tracked as a time-limit exit)

@@ -195,6 +195,12 @@ def cmd_lab(cfg, args) -> int:
             print(f"\nQM (house rules) by {dim}:")
             for k, s in groups.items():
                 print(f"  {k:<44}{row(s)}   {s['first_half']} / {s['second_half']}")
+        from .qm_shadow import load, summary
+        sh = summary(load(cfg["paths"]["state_dir"]))
+        print(f"\nLive shadow mode (recorded, never sent) since {(sh['since'] or 'now')[:10]}: "
+              f"{sh['patterns_recorded']} patterns, closed trades 07-16 UTC:")
+        for name in ("2R/3R", "1R/2R"):
+            print(f"  targets {name:<34}{row(sh[name])}")
         print(f"\nFull results: {res['_path']}")
         return 0
     print(f"{'rule set':<34}{'trades':>6} {'win':>7} {'avg R':>8} {'total R':>8} {'PF':>6} {'max DD':>7}   avg R 1st / 2nd half")

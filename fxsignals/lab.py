@@ -87,14 +87,15 @@ def generate(pair: str, h1: Candles, h4: Candles, d1: Optional[Candles], cfg: di
     return out
 
 
-def qm_signals(pair: str, h1: Candles, h4: Candles, cfg: dict) -> list[dict]:
-    """Every Quasimodo on H1 at the bar its structure break closes (one signal per pattern)."""
+def qm_signals(pair: str, h1: Candles, h4: Candles, cfg: dict, start: int = 205, end: Optional[int] = None) -> list[dict]:
+    """Every Quasimodo on H1 at the bar its structure break closes (one signal per pattern).
+    Bars start..end-1 are checked; the lab stops one bar early (a fill needs the next bar), live checks all."""
     a = cfg["analysis"]
     width = a["swing_width"].get("H1", 3)
     swings, atr = find_swings(h1, width), ind.atr(h1.h, h1.l, h1.c, 14)
     e50 = ind.ema(h4.c, 50)
     out, j4 = [], 0
-    for i in range(205, len(h1) - 1):
+    for i in range(start, len(h1) - 1 if end is None else end):
         now_ts = h1.t[i] + 3600
         while j4 + 1 < len(h4) and h4.t[j4 + 1] + 4 * 3600 <= now_ts:
             j4 += 1  # last closed H4 bar
@@ -179,7 +180,7 @@ def replay(pair: str, h1: Candles, sigs: list[dict], rules: dict, costs: dict) -
         trades.append({"pair": pair, "t": s["t"], "hour": s["hour"], "direction": s["direction"], "type": s["type"],
                        "setup": s["setup"], "score": s["score"], "adx": s["adx"], "ext_atr": s["ext_atr"],
                        "d1_agree": s["d1_agree"], "h4_trend": s.get("h4_trend"), "risk_atr": s.get("risk_atr"),
-                       "outcome": out, "r": round(r, 3)})
+                       "outcome": out, "r": round(r, 3), "exit_t": h1.t[exit_i]})
         busy_until = exit_i
         if r < 0:
             last_loss[s["direction"]] = h1.t[exit_i]

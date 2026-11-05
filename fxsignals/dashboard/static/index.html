@@ -516,7 +516,7 @@ function renderHistory() {
       <td>${esc(h.signal_type.replaceAll("_", " ").toLowerCase())}</td><td>${enteredCell}</td>
       <td>${esc(h.entry_price)}</td><td>${esc(h.stop_loss)}</td><td>${esc(h.take_profit_2)}</td><td>${esc(h.confidence_score)}</td>
       <td><b style="${fg}">${esc(label)}</b>${h.tp1_hit && group !== "WIN" ? '<div class="small muted">TP1 was touched</div>' : ""}</td>
-      <td style="${fg}"><b>${r == null ? "—" : (r > 0 ? "+" : "") + r + "R"}</b></td>
+      <td style="${fg}"><b>${r == null ? "—" : (r > 0 ? "+" : "") + r + "R"}</b>${h.repeat_of ? '<div class="small muted">repeat of a running trade, counted once</div>' : ""}</td>
       <td>${tFmt(h.outcome_at || h.closed_at)}</td><td>${takenCell(h)}</td></tr>`;
   }).join("") || `<tr><td colspan="13" class="muted">${fo || fp ? "No past signals match the filter." : "No finished signals yet — open ones stay in Top opportunities until they win, lose or expire, then move here."}</td></tr>`;
 }
@@ -590,7 +590,11 @@ function renderTrack() {
   if (!t) { $("#track").innerHTML = `<span class="muted">Available after the next scan.</span>`; return; }
   const c = [["Closed", t.closed_trades], ["TP2 wins", t.wins_tp2], ["Stopped", t.losses_stop], ["Break-even", t.breakeven ?? 0], ["Win rate", t.win_rate_pct == null ? "—" : t.win_rate_pct + "%"],
     ["Avg R", t.avg_r ?? "—"], ["Total R", t.total_r], ["Open", t.open], ["Awaiting fill", t.awaiting_fill], ["Not filled", t.not_filled]];
-  $("#track").innerHTML = `<div class="cards">${c.map(([k, v]) => `<div class="card"><div class="k">${k}</div><div class="v" style="font-size:18px">${esc(v)}</div></div>`).join("")}</div><div class="muted" style="margin-top:8px">${esc(t.note)}</div>`;
+  const names = { INTRADAY: "Intraday", SCALP: "⚡ Scalps", QMR: "🧪 QMR" };
+  const styles = Object.entries(t.by_style || {}).map(([k, v]) => `${names[k] || k}: ${v.closed} closed, ${v.wins_tp2} won, ${v.total_r > 0 ? "+" : ""}${v.total_r}R`).join(" · ");
+  $("#track").innerHTML = `<div class="cards">${c.map(([k, v]) => `<div class="card"><div class="k">${k}</div><div class="v" style="font-size:18px">${esc(v)}</div></div>`).join("")}</div>`
+    + (styles ? `<div style="margin-top:8px">${esc(styles)}</div>` : "")
+    + `<div class="muted" style="margin-top:8px">${esc(t.note)}${t.repeats_not_counted ? ` ${t.repeats_not_counted} repeat signals not counted.` : ""}</div>`;
 }
 
 function renderAccount() {

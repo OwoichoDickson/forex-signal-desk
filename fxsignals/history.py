@@ -23,6 +23,22 @@ def style_of(r: dict) -> str:
     return r.get("style") or "INTRADAY"
 
 
+def repeats(records: list[dict]) -> dict[str, str]:
+    """signal_id -> id of the first signal of the same trade idea, for trades entered while an earlier
+    signal for the same style, pair and direction was still running. Such repeats were sent before the
+    'no new signal while a trade runs' rule (4 Nov 2026) and are one trade, so results count them once."""
+    out, running = {}, {}
+    filled = [r for r in records if r.get("filled_at") and r.get("signal_id")]
+    for r in sorted(filled, key=lambda r: r["filled_at"]):
+        k = (style_of(r), r["symbol"], r["direction"])
+        first = running.get(k)
+        if first and (first.get("outcome_at") is None or r["filled_at"] < first["outcome_at"]):
+            out[r["signal_id"]] = first["signal_id"]
+        else:
+            running[k] = r
+    return out
+
+
 def _h1_agrees(h1, t: int, lo: float, hi: float) -> bool:
     """Does the H1 bar containing this M5 bar span its high and low? Unknown hour -> trust the M5 bar."""
     for j in range(len(h1.t) - 1, -1, -1):
@@ -197,7 +213,8 @@ class SignalHistory:
                     r["open_r"] = round(((last - fill) if buy else (fill - last)) / risk, 2)
 
     def track_record(self) -> dict:
-        done = [r for r in self.records if r.get("outcome") in CLOSED_OUTCOMES]
+        rep = repeats(self.records)
+        done = [r for r in self.records if r.get("outcome") in CLOSED_OUTCOMES and r.get("signal_id") not in rep]
         rs = [r.get("result_r") or 0.0 for r in done]
         wins = sum(1 for r in done if r["outcome"] == "WIN_TP2")
         n = len(done)
@@ -211,11 +228,15 @@ class SignalHistory:
             "avg_r": round(sum(rs) / n, 2) if n else None,
             "total_r": round(sum(rs), 2),
             "tp1_touch_rate_pct": round(100 * sum(1 for r in done if r.get("tp1_hit")) / n, 1) if n else None,
-            "open": sum(1 for r in self.records if r.get("outcome") == "OPEN"),
+            "open": sum(1 for r in self.records if r.get("outcome") == "OPEN" and r.get("signal_id") not in rep),
+            "repeats_not_counted": len(rep),
+            "by_style": {st: {"closed": len(g), "total_r": round(sum(r.get("result_r") or 0.0 for r in g), 2),
+                              "wins_tp2": sum(1 for r in g if r["outcome"] == "WIN_TP2")}
+                         for st in sorted({style_of(r) for r in done}) for g in [[r for r in done if style_of(r) == st]]},
             "awaiting_fill": sum(1 for r in self.records if r.get("outcome") == "PENDING_FILL"),
             "not_filled": sum(1 for r in self.records if r.get("outcome") == "NOT_FILLED"),
             "note": ("Live track record of published levels (stop vs TP2, first touch, stop moved to entry after TP1, "
-                     "no costs after entry). "
+                     "no costs after entry, a repeat of a trade that was still running counted once). "
                      + ("Fewer than 30 closed trades — not yet meaningful." if n < 30 else "")).strip(),
         }
 

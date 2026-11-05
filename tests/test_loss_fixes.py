@@ -106,3 +106,13 @@ def test_switched_off_setups_wait_but_scalps_are_unaffected(tmp_path):
     scalp = [{**_buy("USDJPY"), "market_structure": "BULLISH_PULLBACK_TO_LEVEL"}]
     hold_back(scalp, h, day, cfg, style="SCALP")
     assert scalp[0]["direction"] == "BUY"
+
+
+def test_repeats_of_a_running_trade_count_once():
+    from fxsignals.history import repeats
+    base = {"style": None, "symbol": "GBPAUD", "direction": "BUY", "outcome": "LOSS_STOP", "outcome_at": "2026-11-05T11:30"}
+    recs = [{**base, "signal_id": "a", "filled_at": "2026-11-04T11:07"},
+            {**base, "signal_id": "b", "filled_at": "2026-11-04T13:37"},           # while 'a' ran: repeat
+            {**base, "signal_id": "c", "filled_at": "2026-11-05T13:00"},           # after 'a' closed: new trade
+            {**base, "signal_id": "d", "style": "QMR", "filled_at": "2026-11-04T14:00"}]  # other style: own trade
+    assert repeats(recs) == {"b": "a"}

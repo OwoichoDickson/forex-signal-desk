@@ -14,7 +14,7 @@ from urllib.parse import parse_qs, urlparse
 from .. import taken as taken_store
 from ..account import load_account, resize_signals, save_account
 from ..health import status as health_status
-from ..history import SignalHistory, still_valid, on_board
+from ..history import SignalHistory, on_board, repeats, still_valid
 from ..logging_setup import log
 from ..report import blocker_stats, merge_open_signals, refresh_statuses
 from ..scanner import ScanBusy, run_scan
@@ -124,7 +124,8 @@ def serve(cfg: dict) -> None:
                 h = SignalHistory(state_dir / "signal_history.json", cfg["signals"]["expiry_minutes"])
                 now = datetime.now(timezone.utc)
                 answers = taken_store.load(state_dir)
-                rows = [{**r, "still_valid": still_valid(r, now),
+                rep = repeats(h.records)
+                rows = [{**r, "repeat_of": rep.get(r.get("signal_id")), "still_valid": still_valid(r, now),
                          "on_board": on_board(r, now, taken_store.status(answers.get(r.get("signal_id")))),
                          **taken_fields(answers.get(r.get("signal_id")))}
                         for r in h.recent(2000, now)]

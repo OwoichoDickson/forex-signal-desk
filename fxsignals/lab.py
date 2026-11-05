@@ -296,3 +296,161 @@ def run_qm_lab(cfg: dict, pairs: list[str], refresh: bool = False) -> dict:
     atomic_write_json(out, {**result, "trades": trades})
     result["_path"] = str(out)
     return result
+
+
+# ---- ideas lab: market type (trending / ranging) and the London-open sweep of the Asian range ----
+
+def efficiency(c: list[float], i: int, n: int = 48) -> Optional[float]:
+    """Kaufman efficiency ratio over n bars: net move / path length. Near 1 = clean trend, near 0 = chop."""
+    if i < n:
+        return None
+    path = sum(abs(c[k] - c[k - 1]) for k in range(i - n + 1, i + 1))
+    return abs(c[i] - c[i - n]) / path if path else None
+
+
+def _regime_fields(h1: Candles, h4: Candles, h4_adx: list) -> callable:
+    """Attach the market type at signal time: H1 efficiency ratio (48 bars) and H4 ADX of the last closed H4 bar."""
+    import bisect
+
+    def tag(s: dict) -> dict:
+        j = bisect.bisect_right(h4.t, s["t"] - 4 * 3600) - 1
+        return {**s, "er": efficiency(h1.c, s["i"]), "h4_adx": h4_adx[j] if j >= 0 else None}
+    return tag
+
+
+def asian_sweep_signals(pair: str, h1: Candles, cfg: dict, window=(7, 10), min_range_atr=0.5, max_range_atr=3.0) -> list[dict]:
+    """London open: an H1 bar in ``window`` (UTC) trades beyond the Asian range (00-07 UTC) and closes back
+    inside it -> enter the other way at the next open, stop beyond the sweep extreme. One per pair per day."""
+    atr = ind.atr(h1.h, h1.l, h1.c, 14)
+    buf = cfg["analysis"]["sl_buffer_atr"]
+    out, done_day = [], None
+    for i in range(205, len(h1) - 1):
+        t = datetime.fromtimestamp(h1.t[i], timezone.utc)
+        if not window[0] <= t.hour < window[1] or t.date() == done_day or not atr[i]:
+            continue
+        day0 = h1.t[i] - t.hour * 3600
+        asia = [k for k in range(max(0, i - 12), i) if day0 <= h1.t[k] < day0 + 7 * 3600]
+        if len(asia) < 6:
+            continue
+        hi, lo = max(h1.h[k] for k in asia), min(h1.l[k] for k in asia)
+        if not min_range_atr * atr[i] <= hi - lo <= max_range_atr * atr[i]:
+            continue
+        # the session's extreme so far, including earlier London bars
+        sess = range(asia[-1] + 1, i + 1)
+        top, bot = max(h1.h[k] for k in sess), min(h1.l[k] for k in sess)
+        sell = h1.h[i] > hi and h1.c[i] < hi and top == h1.h[i]
+        buy = h1.l[i] < lo and h1.c[i] > lo and bot == h1.l[i]
+        if sell == buy:
+            continue
+        sl = h1.h[i] + buf * atr[i] if sell else h1.l[i] - buf * atr[i]
+        done_day = t.date()
+        out.append({"i": i, "t": h1.t[i] + 3600, "hour": t.hour + 1, "direction": "SELL" if sell else "BUY",
+                    "type": "MARKET_ENTRY", "setup": f"{'BEARISH' if sell else 'BULLISH'}_ASIAN_RANGE_SWEEP",
+                    "score": None, "adx": None, "ext_atr": None, "d1_agree": None,
+                    "entry": h1.c[i], "sl": sl, "risk": abs(h1.c[i] - sl),
+                    "range_mid": (hi + lo) / 2, "range_far": lo if sell else hi, "range_atr": round((hi - lo) / atr[i], 2)})
+    return out
+
+
+def _range_targets(sigs: list[dict]) -> list[dict]:
+    """TP1 at the middle of the Asian range, TP2 at its far side (classic sweep target), at least 1R."""
+    out = []
+    for s in sigs:
+        sg = -1 if s["direction"] == "SELL" else 1
+        tp1 = s["range_mid"] if sg * (s["range_mid"] - s["entry"]) >= 0.5 * s["risk"] else s["entry"] + sg * 0.5 * s["risk"]
+        tp2 = s["range_far"] if sg * (s["range_far"] - s["entry"]) >= s["risk"] else s["entry"] + sg * s["risk"]
+        out.append({**s, "tp1": tp1, "tp2": tp2})
+    return out
+
+
+def _live_signals(cfg: dict, pairs: list[str], candles: dict, refresh: bool) -> dict:
+    """The current engine's signals on every bar, cached (generation is the slow part of the lab)."""
+    import pickle
+    cache = Path(cfg["paths"]["state_dir"]) / "backtests" / "lab_live_signals.pkl"
+    if cache.exists() and not refresh:
+        data = pickle.loads(cache.read_bytes())
+        if set(pairs) <= set(data):
+            return data
+    jobs = [(p, "live", candles[p]["H1"], candles[p]["H4"], candles[p].get("D1"), cfg) for p in pairs]
+    with ProcessPoolExecutor(max_workers=max(1, (os.cpu_count() or 2) - 1)) as ex:
+        data = {pair: sigs for pair, _, sigs in ex.map(_gen_job, jobs)}
+    cache.write_bytes(pickle.dumps(data))
+    return data
+
+
+def run_ideas_lab(cfg: dict, pairs: list[str], refresh: bool = False) -> dict:
+    """Does trading each setup only in its market type help, and does the London sweep of the Asian range pay?"""
+    import asyncio
+    costs = {**DEFAULT_COSTS, **(cfg.get("backtest") or {})}
+    candles = asyncio.run(load_or_fetch(cfg, pairs, DEFAULT_HISTORY, refresh))
+    pairs = [p for p in pairs if candles.get(p, {}).get("H1") and candles[p].get("H4")]
+    first = max(candles[p]["H1"].t[0] for p in pairs) + 205 * 3600
+    last = min(candles[p]["H1"].t[-1] for p in pairs)
+    split = first + (last - first) // 2
+    off = set((cfg.get("signals") or {}).get("disabled_setups") or [])
+    live = _live_signals(cfg, pairs, candles, refresh)
+    house = dict(hours=(7, 16), cooldown_h=4, breakeven=True, d1=None)
+    strat: dict = {"current": {}, "qmr": {}, "sweep": {}}
+    for p in pairs:
+        h1, h4 = candles[p]["H1"], candles[p]["H4"]
+        tag = _regime_fields(h1, h4, ind.adx(h4.h, h4.l, h4.c, 14).adx)
+        strat["current"][p] = [tag(s) for s in live.get(p, []) if s["setup"] not in off and first <= s["t"] <= last]
+        strat["qmr"][p] = [tag(s) for s in _with_targets(qm_signals(p, h1, h4, cfg), (1.0, 2.0)) if first <= s["t"] <= last]
+        strat["sweep"][p] = [tag(s) for s in asian_sweep_signals(p, h1, cfg) if first <= s["t"] <= last]
+
+    def run(name: str, keep=lambda s: True, targets=None, rules=house) -> list[dict]:
+        tr = []
+        for p in pairs:
+            sigs = [s for s in strat[name][p] if keep(s)]
+            if targets:
+                sigs = targets(sigs)
+            for t in replay(p, candles[p]["H1"], sigs, rules, costs):
+                tr.append(t)
+        # carry the market type onto each trade for the breakdowns
+        idx = {(s["t"], p): s for p in pairs for s in strat[name][p]}
+        for t in tr:
+            s = idx.get((t["t"], t["pair"])) or {}
+            t["er"], t["h4_adx"] = s.get("er"), s.get("h4_adx")
+        return sorted(tr, key=lambda t: t["t"])
+
+    trending = lambda s, er=0.3: s["er"] is not None and s["er"] >= er
+    ranging = lambda s, er=0.3: s["er"] is not None and s["er"] < er
+    adx_trend = lambda s, a=25: s["h4_adx"] is not None and s["h4_adx"] >= a
+    variants = {
+        "Current rules (7 setups off)": run("current"),
+        "Current, trending only (ER>=0.3)": run("current", trending),
+        "Current, trending only (ER>=0.2)": run("current", lambda s: trending(s, 0.2)),
+        "Current, H4 ADX>=25 only": run("current", adx_trend),
+        "Current, ranging only (ER<0.3)": run("current", ranging),
+        "QMR 1R/2R": run("qmr"),
+        "QMR, ranging only (ER<0.3)": run("qmr", ranging),
+        "QMR, ranging only (ER<0.2)": run("qmr", lambda s: ranging(s, 0.2)),
+        "QMR, H4 ADX<25 only": run("qmr", lambda s: s["h4_adx"] is not None and s["h4_adx"] < 25),
+        "Sweep, range targets": run("sweep", targets=_range_targets),
+        "Sweep, 1R/2R": run("sweep", targets=lambda v: _with_targets(v, (1.0, 2.0))),
+        "Sweep, 1.5R/2.5R": run("sweep", targets=lambda v: _with_targets(v, (1.5, 2.5))),
+        "Sweep, range targets, ranging (ER<0.3)": run("sweep", ranging, targets=_range_targets),
+        "Sweep, range targets, H4 ADX<25": run("sweep", lambda s: s["h4_adx"] is not None and s["h4_adx"] < 25, targets=_range_targets),
+    }
+    def er_b(t):
+        return "n/a" if t["er"] is None else "ER<0.15" if t["er"] < 0.15 else "ER 0.15-0.3" if t["er"] < 0.3 else "ER 0.3-0.45" if t["er"] < 0.45 else "ER>=0.45"
+    def adx_b(t):
+        return "n/a" if t["h4_adx"] is None else "H4 ADX<20" if t["h4_adx"] < 20 else "H4 ADX 20-25" if t["h4_adx"] < 25 else "H4 ADX 25-35" if t["h4_adx"] < 35 else "H4 ADX>=35"
+    by = {}
+    for name in ("Current rules (7 setups off)", "QMR 1R/2R", "Sweep, range targets"):
+        by[name] = {"efficiency": breakdown(variants[name], er_b, split), "h4_adx": breakdown(variants[name], adx_b, split)}
+    by["Sweep, range targets"]["direction"] = breakdown(variants["Sweep, range targets"], lambda t: t["direction"], split)
+    by["Sweep, range targets"]["hour_utc"] = breakdown(variants["Sweep, range targets"], lambda t: f"{t['hour']:02d}", split)
+    result = {
+        "generated_at": datetime.now(timezone.utc).isoformat(), "costs": costs, "pairs": pairs,
+        "period": {"from": datetime.fromtimestamp(first, timezone.utc).isoformat(),
+                   "split": datetime.fromtimestamp(split, timezone.utc).isoformat(),
+                   "to": datetime.fromtimestamp(last, timezone.utc).isoformat()},
+        "rulesets": {k: {"overall": summarise(v), **_halves(v, split)} for k, v in variants.items()},
+        "by": by,
+        "limitations": [__doc__.strip().split("\n\n")[-1].replace("\n", " ")],
+    }
+    out = Path(cfg["paths"]["state_dir"]) / "backtests" / f"lab_ideas_{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}.json"
+    atomic_write_json(out, {**result, "trades": variants})
+    result["_path"] = str(out)
+    return result

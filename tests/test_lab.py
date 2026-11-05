@@ -38,3 +38,24 @@ def test_one_trade_at_a_time_hours_and_cooldown():
     assert sigs[2]["t"] not in [t["t"] for t in tr]  # within 4h of the stop-out
     tr = replay("EURUSD", bars, [sig(0, hour=3)], {**RULES, "hours": (7, 16)}, NOCOST)
     assert tr == []
+
+
+def test_efficiency_ratio_is_one_for_a_straight_line_and_low_for_chop():
+    from fxsignals.lab import efficiency
+    assert efficiency([1 + k * 0.001 for k in range(60)], 59) == 1.0
+    assert efficiency([1 + (k % 2) * 0.001 for k in range(60)], 59) == 0.0
+
+
+def test_london_sweep_of_the_asian_high_gives_a_sell():
+    from datetime import datetime, timezone
+    from fxsignals.lab import _range_targets, asian_sweep_signals
+    day = int(datetime(2026, 11, 5, tzinfo=timezone.utc).timestamp())
+    n = 220
+    t = [day - (210 - k) * 3600 for k in range(n)]           # bar 210 opens at 00:00 UTC
+    c = [1.1000] * n
+    h, l = [x + 0.0010 for x in c], [x - 0.0010 for x in c]
+    h[217] = 1.1030                                          # 07:00 bar pokes above the Asian high, closes back inside
+    sigs = asian_sweep_signals("EURUSD", Candles("EURUSD", "H1", t, c, h, l, c, [1] * n), {"analysis": {"sl_buffer_atr": 0.25}})
+    assert [(s["i"], s["direction"]) for s in sigs] == [(217, "SELL")]
+    s = _range_targets(sigs)[0]
+    assert s["sl"] > 1.1030 and s["tp2"] < s["entry"]

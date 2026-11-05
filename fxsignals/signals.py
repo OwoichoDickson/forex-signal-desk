@@ -174,7 +174,65 @@ def analyse_pair(pair: str, candles: dict[str, Optional[Candles]], quote: Option
         return _wait(base, "INSUFFICIENT_DATA", f"Insufficient candle data: {detail}", tfa, inst, None, None)
     res = decide(pair, tfa, quote, fund, cfg, market_open)
     res["scalp"] = decide_scalp(pair, tfa, quote, fund, cfg, market_open)
+    res["qmr"] = decide_qmr(pair, candles.get("H1"), tfa, quote, fund, cfg, market_open)
     return res
+
+
+def decide_qmr(pair: str, h1c: Optional[Candles], tfa: dict[str, TFAnalysis], quote: Optional[Quote],
+               fund: PairFundamentals, cfg: dict, market_open: bool) -> Optional[dict[str, Any]]:
+    """🧪 QMR (Quasimodo reversal) on H1, sent as its own style: a limit order at the QM level (left shoulder)
+    after structure broke, stop beyond the head, targets in R. It lost money in the strategy lab, so every
+    message says it is being tested. Returns None when there is no fresh pattern."""
+    q = cfg.get("qmr") or {}
+    h1 = tfa.get("H1")
+    if not q.get("enabled") or h1c is None or h1 is None or not h1.atr or fund.blackout_events:
+        return None
+    a, inst, atr = cfg["analysis"], instrument(pair), h1.atr
+    width = a["swing_width"].get("H1", 3)
+    pats = st.find_quasimodo(h1c, getattr(h1.structure, "_swings", None) or st.find_swings(h1c, width), width,
+                             max_break_ago=q.get("max_break_bars_ago", 3))
+    if not pats:
+        return None
+    p = pats[0]
+    bear = p.direction == "BEARISH"
+    sgn = -1 if bear else 1
+    price = quote.last if quote and quote.last else h1.close
+    stop = p.head - sgn * a["sl_buffer_atr"] * atr
+    risk = abs(p.qml - stop)
+    if not a["min_sl_atr"] * atr <= risk <= a["max_sl_atr"] * atr or sgn * (price - p.qml) < 0.2 * atr:
+        return None  # stop too tight/wide, or price already at the QM level
+    tr = q.get("targets_r", [1.0, 2.0, 3.0])
+    tps = [p.qml + sgn * r * risk for r in tr]
+    status = "PENDING" if market_open else "MARKET_CLOSED"
+    side = "BULLISH" if not bear else "BEARISH"
+    alignment = ",".join(tf for tf in ("M15", "H1", "H4", "D1") if tf in tfa and tfa[tf].bias == side)
+    return {
+        "symbol": pair, "economic_risk": fund.economic_risk, "headlines": fund.headlines, "catalyst": catalyst_text(fund, pair),
+        "style": "QMR", "entry_minutes": q.get("entry_minutes", 720),
+        "direction": "SELL" if bear else "BUY", "signal_type": "SELL_LIMIT" if bear else "BUY_LIMIT",
+        "entry_price": inst.round_price(p.qml), "stop_loss": inst.round_price(stop),
+        "take_profit_1": inst.round_price(tps[0]), "take_profit_2": inst.round_price(tps[1]), "take_profit_3": inst.round_price(tps[2]),
+        "risk_reward": f"1:{tr[1]:.1f}", "confidence_score": q.get("confidence", 60), "trend": side,
+        "momentum": "MODERATE" if (h1.adx or 0) >= 20 else "WEAK",
+        "rsi": _r(h1.rsi, 1), "ema_20": inst.round_price(h1.ema20), "ema_50": inst.round_price(h1.ema50),
+        "atr": _r(atr, inst.price_decimals + 1), "timeframe_alignment": alignment,
+        "market_structure": f"{side}_QUASIMODO",
+        "reason": (f"QMR {'SELL' if bear else 'BUY'}: H1 made a {'higher high' if bear else 'lower low'} (head "
+                   f"{inst.round_price(p.head)}) then broke {'below' if bear else 'above'} {inst.round_price(p.broken)}; "
+                   f"limit at the left shoulder (QM level), stop beyond the head. Being tested: lost money in the lab."),
+        "status": status, "actionable": False,
+        "details": {
+            "d1_trend": _d1_trend(tfa.get("D1"), not bear), "entry_basis": "level",
+            "risk_reward_by_target": [f"1:{r:.2f}" for r in tr],
+            "stop_distance_pips": round(inst.to_pips(risk), 1),
+            "atr_h1_pips": round(inst.to_pips(atr), 1),
+            "quasimodo": {"qml": inst.round_price(p.qml), "head": inst.round_price(p.head),
+                          "broken": inst.round_price(p.broken), "bars_since_break": p.bars_since_break},
+            "surprises": fund.surprises, "upcoming_high_impact": [e.to_dict() for e in fund.upcoming_high],
+            "technicals": {tf: tfa[tf].summary(inst) for tf in ("H1", "H4") if tf in tfa},
+            "warnings": ["🧪 QMR is being tested: it lost money after costs in the strategy lab (Jan–Nov 2026)."],
+        },
+    }
 
 
 def decide_scalp(pair: str, tfa: dict[str, TFAnalysis], quote: Optional[Quote], fund: PairFundamentals,

@@ -1,0 +1,20 @@
+from fxsignals.config import load_config
+from fxsignals.fundamentals import PairFundamentals
+from fxsignals.notify import fmt_signal
+from fxsignals.signals import analyse_timeframe, decide_qmr
+from tests.test_qm_shadow import _h1
+
+CFG = load_config()
+
+
+def test_qmr_signal_is_a_limit_at_the_qm_level_with_stop_beyond_the_head():
+    c = _h1([1.080, 1.100, 1.090, 1.120, 1.085])
+    cfg = {**CFG, "qmr": {**CFG["qmr"], "enabled": True}}
+    s = decide_qmr("EURUSD", c, {"H1": analyse_timeframe(c, cfg)}, None, PairFundamentals(available=False), cfg, True)
+    assert s["style"] == "QMR" and s["direction"] == "SELL" and s["signal_type"] == "SELL_LIMIT"
+    assert s["entry_price"] == 1.104 and s["stop_loss"] > 1.124
+    risk = s["stop_loss"] - s["entry_price"]
+    assert abs((s["entry_price"] - s["take_profit_2"]) - 2 * risk) < 1e-4
+    assert "🧪 QMR" in fmt_signal({**s, "signal_id": "x"}, None)
+    off = {**cfg, "qmr": {**cfg["qmr"], "enabled": False}}
+    assert decide_qmr("EURUSD", c, {"H1": analyse_timeframe(c, off)}, None, PairFundamentals(available=False), off, True) is None

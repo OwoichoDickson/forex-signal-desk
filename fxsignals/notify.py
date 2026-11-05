@@ -275,9 +275,11 @@ def fmt_signal(s: dict, public_url: Optional[str], tz: str = "UTC") -> str:
     when = "Enter now" if status == "ACTIVE" else "Pending order — waits for price" if status == "PENDING" else "Market closed — re-check at the open"
     link = f"\n<a href=\"{escape(public_url)}\">Open dashboard</a>" if public_url else ""
     scalp = s.get("style") == "SCALP"
-    tag = "⚡ SCALP · " if scalp else ""
+    tag = "⚡ SCALP · " if scalp else "🧪 QMR (testing) · " if s.get("style") == "QMR" else ""
     hold = (f"\n⚡ <b>Short trade: close it within {s.get('max_hold_minutes', 120)} minutes</b> of entering, "
-            f"even if no stop or target is hit." if scalp else "")
+            f"even if no stop or target is hit." if scalp else
+            "\n🧪 <b>Quasimodo reversal, still being tested</b>: it lost money in the strategy lab. Small size or demo only."
+            if s.get("style") == "QMR" else "")
     return (
         f"<b>{tag}{arrow} {escape(s['symbol'])}</b> — {escape(s['signal_type'].replace('_', ' '))}\n"
         f"{when} · confidence <b>{s['confidence_score']}</b>{hold}\n"
@@ -296,6 +298,8 @@ def fmt_outcome(r: dict, answer: Optional[bool] = None) -> str:
     head = "✅ WIN" if win else "➖ BREAK-EVEN" if be else "❌ LOSS" if out == "LOSS_STOP" else "⏹ CLOSED (time limit)"
     if r.get("style") == "SCALP":
         head = "⚡ " + head
+    elif r.get("style") == "QMR":
+        head = "🧪 QMR · " + head
     exit_ = ("TP2 " + str(r["take_profit_2"]) if win else f"stop at entry after TP1" if be
              else "stop " + str(r["stop_loss"]) if out == "LOSS_STOP"
              else f"closed at {r['exit_price']} (time limit)" if r.get("exit_price") is not None else "closed")

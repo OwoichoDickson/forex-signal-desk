@@ -146,7 +146,7 @@ a { color: var(--accent); }
           <option value="H4">H4</option><option value="D1">D1</option>
         </select>
         <select id="fDir"><option value="">All directions</option><option>BUY</option><option>SELL</option><option>WAIT</option></select>
-        <select id="fStyle"><option value="">All trade styles</option><option value="SCALP">⚡ Scalps only</option><option value="INTRADAY">Intraday only</option></select>
+        <select id="fStyle"><option value="">All trade styles</option><option value="SCALP">⚡ Scalps only</option><option value="QMR">🧪 QMR only</option><option value="INTRADAY">Intraday only</option></select>
         <label class="small muted">Min confidence <input id="fConf" type="number" min="0" max="100" value="0" style="width:64px"></label>
         <a href="#lots" data-go="lots" class="small" id="planLink">Lot sizes: set an amount →</a>
       </div>
@@ -281,7 +281,8 @@ const scalpClose = (s) => {
   const end = new Date(Date.parse(s.filled_at) + (s.max_hold_minutes || 120) * 60000), left = Math.round((end - Date.now()) / 60000);
   return `<div class="small ${left <= 15 ? "BEARISH" : "warn"}" style="padding:1px 4px;border-radius:4px;margin-top:2px">⏱ Close by ${end.toISOString().slice(11, 16)} UTC (${Math.max(0, left)} min left)</div>`;
 };
-const scalpTag = (s) => s.style === "SCALP" ? ` <span class="pill warn" title="Short trade: close within ${s.max_hold_minutes || 120} minutes of entering">⚡ Scalp</span>` : "";
+const scalpTag = (s) => s.style === "SCALP" ? ` <span class="pill warn" title="Short trade: close within ${s.max_hold_minutes || 120} minutes of entering">⚡ Scalp</span>`
+  : s.style === "QMR" ? ` <span class="pill warn" title="Quasimodo reversal, still being tested: it lost money in the strategy lab">🧪 QMR</span>` : "";
 
 function renderCards() {
   const ms = report.market_summary || {};

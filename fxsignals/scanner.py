@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 from . import filelock
 from . import fundamentals as fx_fund
 from .config import all_pairs
-from .history import SignalHistory, atomic_write_json, effective_status
+from .history import SignalHistory, atomic_write_json, effective_status, style_of
 from .instruments import RateBook
 from .logging_setup import log
 from .market_data import TradingViewData, data_freshness
@@ -150,12 +150,16 @@ def analyse_market(cfg: dict, raw: dict, now: datetime, history: SignalHistory) 
     book = RateBook(prices)
     min_conf, top_n = cfg["signals"]["min_confidence"], cfg["signals"]["top_n"]
     scalps = [s for s in (res.pop("scalp", None) for res in results) if s]
+    qmrs = [s for s in (res.pop("qmr", None) for res in results) if s]
     hold_back(results, history, now, cfg["signals"])
     ranked = rank_signals(results, min_conf, top_n)
     if scalps:  # ⚡ short trades: ranked on their own, checked only against other scalps
         sc = cfg.get("scalp") or {}
         hold_back(scalps, history, now, cfg["signals"], style="SCALP")
         ranked += rank_signals(scalps, sc.get("min_confidence", 70), sc.get("top_n", 5))
+    if qmrs:  # 🧪 QMR: its own style, checked only against other QMR signals
+        hold_back(qmrs, history, now, cfg["signals"], style="QMR")
+        ranked += rank_signals(qmrs, 0, (cfg.get("qmr") or {}).get("top_n", 5))
     for s in ranked:
         # pip value + stop pips are always stored; lots are only kept when an amount was entered
         s["position_size"] = position_size(s["symbol"], s["entry_price"], s["stop_loss"], r["account_balance"] or 100.0,
@@ -253,7 +257,7 @@ def notify_history(cfg: dict, history: SignalHistory, ranked: list[dict]) -> Non
                 continue
             if tg.enabled:
                 tg.send(text, buttons)
-                if key in neutral:
+                if key in neutral and (style_of(rec) != "QMR" or (cfg.get("qmr") or {}).get("send_to_followers")):
                     tg.broadcast(neutral[key], rec.get("signal_id"), f"{rec.get('symbol')} {rec.get('direction')}")
             sent.add(key)
         rec["notified_events"] = sorted(sent)

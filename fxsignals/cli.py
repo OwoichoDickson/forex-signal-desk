@@ -72,8 +72,21 @@ def write_schedule(cfg: dict, interval_s: float, wait_s: float) -> None:
     })
 
 
+def keep_awake() -> None:
+    """macOS: block idle sleep while this process runs (caffeinate exits with it). A closed lid on battery
+    still sleeps — no app can stop that."""
+    import shutil
+    import subprocess
+    exe = shutil.which("caffeinate")
+    if sys.platform == "darwin" and exe:
+        subprocess.Popen([exe, "-i", "-w", str(os.getpid())], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        log(logger, logging.INFO, "keeping the Mac awake while scanning (idle sleep blocked)")
+
+
 def cmd_run(cfg, args) -> int:
     interval = (args.interval or cfg["scan"]["interval_minutes"]) * 60
+    if cfg["scan"].get("keep_awake", True):
+        keep_awake()
     stop = {"flag": False}
 
     def _stop(*_):

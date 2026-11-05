@@ -151,8 +151,9 @@ scripts/service.sh uninstall
 Things to keep in mind:
 
 * TradingView must stay open **with port 9222** (step 4). After a restart, open it with that command again.
-* A sleeping Mac does not scan. Closing the lid on battery puts it to sleep. Plug it in and turn off automatic
-  sleep (System Settings → Battery/Energy), or run `caffeinate -dims` in a Terminal window.
+* A sleeping Mac does not scan. The scanner blocks idle sleep while it runs (`scan: keep_awake`, on by default),
+  but closing the lid on battery still puts the Mac to sleep: keep it open during trading hours, or plug in
+  with an external display.
 * Scans run Mon–Fri while the market is open (`scan:` section of `config.yaml`).
 * After changing code or `config.yaml`, restart a service, e.g.
   `launchctl kickstart -k gui/$(id -u)/com.fxsignals.scanner`.

@@ -161,22 +161,37 @@ def replay(pair: str, h1: Candles, sigs: list[dict], rules: dict, costs: dict) -
         if fill_i is None:
             continue
         risk = abs(fill - s["sl"]) or 1e-12
-        at_entry, out, exit_px, exit_i = False, None, None, None
-        for j in range(fill_i, min(len(h1), fill_i + MAX_HOLD)):
-            stop = fill if at_entry else s["sl"]
+        # exit management (defaults = house rules): partial = share closed at TP1; trail_r = after TP1 the stop
+        # follows the best price at this many R; no_tp2 = no final target (trail or time exit only)
+        partial, trail_r, hold = rules.get("partial", 0.0), rules.get("trail_r"), rules.get("max_hold", MAX_HOLD)
+        sg = 1 if buy else -1
+        gain = lambda px: sg * (px - fill) / risk
+        stop, left, banked, tp1_hit, best = s["sl"], 1.0, 0.0, False, fill
+        out, exit_px, exit_i = None, None, None
+        for j in range(fill_i, min(len(h1), fill_i + hold)):
             if (h1.l[j] <= stop) if buy else (h1.h[j] >= stop):
-                exit_px, exit_i = (stop - slip if buy else stop + slip), j
-                out = "BREAKEVEN" if at_entry else "STOP"
+                exit_px, exit_i = stop - sg * slip, j
+                out = "STOP" if not tp1_hit else "BREAKEVEN" if abs(stop - fill) < 1e-12 else "TRAIL" if gain(stop) > 0 else "STOP"
                 break
-            if (h1.h[j] >= s["tp2"]) if buy else (h1.l[j] <= s["tp2"]):
+            reach = lambda px: (h1.h[j] >= px) if buy else (h1.l[j] <= px)
+            if partial and not tp1_hit and reach(s["tp1"]):
+                banked, left = partial * gain(s["tp1"]), 1.0 - partial
+            if not rules.get("no_tp2") and reach(s["tp2"]):
                 exit_px, exit_i, out = s["tp2"], j, "TARGET"
                 break
-            if rules["breakeven"] and ((h1.h[j] >= s["tp1"]) if buy else (h1.l[j] <= s["tp1"])):
-                at_entry = True  # from the next bar on
+            best = max(best, h1.h[j]) if buy else min(best, h1.l[j])
+            if reach(s["tp1"]):
+                tp1_hit = True
+            if tp1_hit:  # applied from the next bar on
+                if rules["breakeven"]:
+                    stop = max(stop, fill) if buy else min(stop, fill)
+                if trail_r:
+                    t = best - sg * trail_r * risk
+                    stop = max(stop, t) if buy else min(stop, t)
         if out is None:
-            exit_i = min(len(h1), fill_i + MAX_HOLD) - 1
+            exit_i = min(len(h1), fill_i + hold) - 1
             exit_px, out = h1.c[exit_i], "OPEN_AT_END" if exit_i == len(h1) - 1 else "TIME_EXIT"
-        r = ((exit_px - fill) if buy else (fill - exit_px)) / risk
+        r = banked + left * gain(exit_px)
         trades.append({"pair": pair, "t": s["t"], "hour": s["hour"], "direction": s["direction"], "type": s["type"],
                        "setup": s["setup"], "score": s["score"], "adx": s["adx"], "ext_atr": s["ext_atr"],
                        "d1_agree": s["d1_agree"], "h4_trend": s.get("h4_trend"), "risk_atr": s.get("risk_atr"),
@@ -378,15 +393,20 @@ def _live_signals(cfg: dict, pairs: list[str], candles: dict, refresh: bool) -> 
     return data
 
 
-def run_ideas_lab(cfg: dict, pairs: list[str], refresh: bool = False) -> dict:
-    """Does trading each setup only in its market type help, and does the London sweep of the Asian range pay?"""
+def _load(cfg: dict, pairs: list[str], refresh: bool) -> tuple:
+    """Costs, cached candles, usable pairs, the common period and its walk-forward split."""
     import asyncio
     costs = {**DEFAULT_COSTS, **(cfg.get("backtest") or {})}
     candles = asyncio.run(load_or_fetch(cfg, pairs, DEFAULT_HISTORY, refresh))
     pairs = [p for p in pairs if candles.get(p, {}).get("H1") and candles[p].get("H4")]
     first = max(candles[p]["H1"].t[0] for p in pairs) + 205 * 3600
     last = min(candles[p]["H1"].t[-1] for p in pairs)
-    split = first + (last - first) // 2
+    return costs, candles, pairs, first, last, first + (last - first) // 2
+
+
+def run_ideas_lab(cfg: dict, pairs: list[str], refresh: bool = False) -> dict:
+    """Does trading each setup only in its market type help, and does the London sweep of the Asian range pay?"""
+    costs, candles, pairs, first, last, split = _load(cfg, pairs, refresh)
     off = set((cfg.get("signals") or {}).get("disabled_setups") or [])
     live = _live_signals(cfg, pairs, candles, refresh)
     house = dict(hours=(7, 16), cooldown_h=4, breakeven=True, d1=None)
@@ -451,6 +471,77 @@ def run_ideas_lab(cfg: dict, pairs: list[str], refresh: bool = False) -> dict:
         "limitations": [__doc__.strip().split("\n\n")[-1].replace("\n", " ")],
     }
     out = Path(cfg["paths"]["state_dir"]) / "backtests" / f"lab_ideas_{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}.json"
+    atomic_write_json(out, {**result, "trades": variants})
+    result["_path"] = str(out)
+    return result
+
+
+# exit management tested on the same entries (house = break-even after TP1, engine targets)
+HOUSE = dict(hours=(7, 16), cooldown_h=4, breakeven=True, d1=None)
+EXIT_RULES = {
+    "House: break-even after TP1": {},
+    "No break-even": dict(breakeven=False),
+    "Half off at TP1, rest to TP2 (break-even)": dict(partial=0.5),
+    "Half off at TP1, rest trails 1R": dict(partial=0.5, trail_r=1.0),
+    "Half off at TP1, rest trails 1R, no TP2": dict(partial=0.5, trail_r=1.0, no_tp2=True),
+    "Trail 1R after TP1": dict(trail_r=1.0),
+    "Trail 1.5R after TP1, no TP2": dict(trail_r=1.5, no_tp2=True),
+    "Close after 24 h": dict(max_hold=24),
+    "Close after 48 h": dict(max_hold=48),
+}
+EXIT_TARGETS = {"Targets 1R/2R": (1.0, 2.0), "Targets 1R/3R": (1.0, 3.0), "Targets 1.5R/3R": (1.5, 3.0)}
+QMR_EXITS = {
+    "QMR house: 1R/2R, break-even at 1R": {},
+    "QMR half off at 1R, rest to 2R": dict(partial=0.5),
+    "QMR half off at 1R, rest to 3R": dict(partial=0.5, tp=(1.0, 3.0)),
+    "QMR half off at 1R, rest trails 1R, no TP2": dict(partial=0.5, trail_r=1.0, no_tp2=True),
+    "QMR no break-even": dict(breakeven=False),
+}
+
+
+def run_exits_lab(cfg: dict, pairs: list[str], refresh: bool = False) -> dict:
+    """Same entries, different exits: partial profit at TP1, trailing stops, fixed R targets, time exits."""
+    costs, candles, pairs, first, last, split = _load(cfg, pairs, refresh)
+    off = set((cfg.get("signals") or {}).get("disabled_setups") or [])
+    live = _live_signals(cfg, pairs, candles, refresh)
+    cur = {p: [{**s, "risk": abs(s["entry"] - s["sl"])} for s in live.get(p, []) if s["setup"] not in off and first <= s["t"] <= last]
+           for p in pairs}
+    qmr = {p: [s for s in qm_signals(p, candles[p]["H1"], candles[p]["H4"], cfg) if first <= s["t"] <= last] for p in pairs}
+
+    def run(sigs: dict, rules: dict, tp=None) -> list[dict]:
+        tr = []
+        for p in pairs:
+            tr += replay(p, candles[p]["H1"], _with_targets(sigs[p], tp) if tp else sigs[p], {**HOUSE, **rules}, costs)
+        return sorted(tr, key=lambda t: t["t"])
+
+    variants = {name: run(cur, r) for name, r in EXIT_RULES.items()}
+    variants |= {name: run(cur, {}, tp) for name, tp in EXIT_TARGETS.items()}
+    variants |= {name: run(cur, {"partial": 0.5}, tp) for name, tp in
+                 {"Half off at 1R, rest to 2R": (1.0, 2.0), "Half off at 1R, rest to 3R": (1.0, 3.0)}.items()}
+    variants |= {name: run(qmr, {k: v for k, v in r.items() if k != "tp"}, r.get("tp", (1.0, 2.0))) for name, r in QMR_EXITS.items()}
+    sets = {k: {"overall": summarise(v), **_halves(v, split)} for k, v in variants.items()}
+    # walk-forward: the exit that did best on the first half, judged on the second half it never chose on
+    current = [k for k in variants if not k.startswith("QMR")]
+    pick = max(current, key=lambda k: sets[k]["first_half"]["expectancy_r"] or -9)
+    base = "House: break-even after TP1"
+    sg = lambda s: 1 if s["direction"] == "BUY" else -1
+    tp_r = [(sg(s) * (s["tp1"] - s["entry"]) / s["risk"], sg(s) * (s["tp2"] - s["entry"]) / s["risk"])
+            for v in cur.values() for s in v if s["risk"]]
+    med = lambda xs: sorted(xs)[len(xs) // 2] if xs else None
+    result = {
+        "generated_at": datetime.now(timezone.utc).isoformat(), "costs": costs, "pairs": pairs,
+        "period": {"from": datetime.fromtimestamp(first, timezone.utc).isoformat(),
+                   "split": datetime.fromtimestamp(split, timezone.utc).isoformat(),
+                   "to": datetime.fromtimestamp(last, timezone.utc).isoformat()},
+        "rulesets": sets,
+        "engine_targets_r": {"tp1_median": round(med([a for a, _ in tp_r]), 2), "tp2_median": round(med([b for _, b in tp_r]), 2)},
+        "walk_forward": {"picked_on_first_half": pick, "second_half": sets[pick]["second_half"]["expectancy_r"],
+                         "house_second_half": sets[base]["second_half"]["expectancy_r"]},
+        "by": {name: {"outcome": breakdown(variants[name], lambda t: t["outcome"], split)}
+               for name in (base, pick)},
+        "limitations": [__doc__.strip().split("\n\n")[-1].replace("\n", " ")],
+    }
+    out = Path(cfg["paths"]["state_dir"]) / "backtests" / f"lab_exits_{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}.json"
     atomic_write_json(out, {**result, "trades": variants})
     result["_path"] = str(out)
     return result

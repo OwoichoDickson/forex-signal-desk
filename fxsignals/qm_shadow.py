@@ -3,8 +3,8 @@ sent, so the lab result (it lost after costs on ~10 months of history) can be ch
 
 Each scan records the Quasimodos whose structure break closed in the last few H1 bars, then replays every
 recorded pattern on the bars since, with the lab's rules and costs (limit at the QM level for 12 bars,
-stop beyond the head, break-even after TP1, five days at most). Two target sets are tracked: 2R/3R
-(house rules) and 1R/2R (the lab's least bad).
+stop beyond the head, break-even after TP1, five days at most). Three exit sets are tracked: 2R/3R
+(house rules), 1R/2R, and 1R/2R with half closed at 1R (the exits lab's best for QMR, +0.04R).
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from .lab import MAX_HOLD, _with_targets, qm_signals, replay
 from .models import Candles
 
 FILE = "qm_shadow.json"
-TARGETS = {"2R/3R": (2.0, 3.0), "1R/2R": (1.0, 2.0)}
+TARGETS = {"2R/3R": ((2.0, 3.0), {}), "1R/2R": ((1.0, 2.0), {}), "1R/2R, half at 1R": ((1.0, 2.0), {"partial": 0.5})}
 RULES = dict(hours=None, cooldown_h=0, breakeven=True, d1=None)  # hours are applied in the summary
 RECENT_BARS = 6  # catch up on patterns missed while the Mac slept
 
@@ -57,8 +57,8 @@ def update(state_dir, h1: dict[str, Candles], h4: dict[str, Candles], cfg: dict,
         except ValueError:
             continue  # rolled out of the loaded bars
         sig = {**r, "i": i, "score": None, "adx": None, "ext_atr": None, "d1_agree": None}
-        for name, tp in TARGETS.items():
-            trades = replay(r["symbol"], c, _with_targets([sig], tp), RULES, costs)
+        for name, (tp, extra) in TARGETS.items():
+            trades = replay(r["symbol"], c, _with_targets([sig], tp), {**RULES, **extra}, costs)
             if trades and trades[0]["outcome"] != "OPEN_AT_END":
                 r["results"][name] = {"outcome": trades[0]["outcome"], "r": trades[0]["r"], "exit_t": trades[0]["exit_t"]}
             elif not trades and len(c) > i + 1 + r["valid_bars"]:

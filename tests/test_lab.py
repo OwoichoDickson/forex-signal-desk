@@ -59,3 +59,17 @@ def test_london_sweep_of_the_asian_high_gives_a_sell():
     assert [(s["i"], s["direction"]) for s in sigs] == [(217, "SELL")]
     s = _range_targets(sigs)[0]
     assert s["sl"] > 1.1030 and s["tp2"] < s["entry"]
+
+
+def test_half_off_at_tp1_banks_profit_before_break_even():
+    bars = h1([FLAT, FLAT, (1.1, 1.1045, 1.0999, 1.104), (1.104, 1.1041, 1.0975, 1.098)] + [FLAT] * 3)
+    t = replay("EURUSD", bars, [sig(0)], {**RULES, "breakeven": True, "partial": 0.5}, NOCOST)[0]
+    assert t["outcome"] == "BREAKEVEN" and t["r"] == 1.0  # half at TP1 (2R), half at entry
+
+
+def test_trailing_stop_follows_the_best_price_after_tp1():
+    bars = h1([FLAT, FLAT, (1.1, 1.105, 1.0999, 1.105), (1.105, 1.1052, 1.1025, 1.103)] + [FLAT] * 3)
+    t = replay("EURUSD", bars, [sig(0)], {**RULES, "trail_r": 1.0}, NOCOST)[0]
+    assert t["outcome"] == "TRAIL" and t["r"] == 1.5  # best 1.105 - 1R = 1.103
+    t = replay("EURUSD", bars, [sig(0)], {**RULES, "max_hold": 2}, NOCOST)[0]
+    assert t["outcome"] == "TIME_EXIT"

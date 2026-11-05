@@ -180,13 +180,18 @@ def cmd_backtest(cfg, args) -> int:
 
 
 def cmd_lab(cfg, args) -> int:
-    from .lab import run_ideas_lab, run_lab, run_qm_lab
-    res = (run_qm_lab if args.qm else run_ideas_lab if args.ideas else run_lab)(cfg, args.pairs or all_pairs(cfg), refresh=args.refresh)
+    from .lab import run_exits_lab, run_ideas_lab, run_lab, run_qm_lab
+    res = (run_qm_lab if args.qm else run_ideas_lab if args.ideas else run_exits_lab if args.exits else run_lab)(cfg, args.pairs or all_pairs(cfg), refresh=args.refresh)
     p = res["period"]
     print(f"History {p['from'][:10]} → {p['to'][:10]} · walk-forward split {p['split'][:10]} · costs {res['costs']}\n")
     row = lambda s: (f"{s['trades']:>6} {str(s['win_rate_pct']):>6}% {str(s['expectancy_r']):>8} {s['total_r']:>8} "
                      f"{str(s['profit_factor']):>6} {s['max_drawdown_r']:>7}")
-    if args.ideas:
+    if args.ideas or args.exits:
+        if args.exits:
+            e, w = res["engine_targets_r"], res["walk_forward"]
+            print(f"Engine targets (median): TP1 {e['tp1_median']}R, TP2 {e['tp2_median']}R")
+            print(f"Walk-forward: best on 1st half = {w['picked_on_first_half']} → 2nd half {w['second_half']} "
+                  f"(house rules: {w['house_second_half']})\n")
         print(f"{'rule set':<42}{'trades':>6} {'win':>7} {'avg R':>8} {'total R':>8} {'PF':>6} {'max DD':>7}   avg R 1st / 2nd half")
         for name, r in res["rulesets"].items():
             print(f"{name:<42}{row(r['overall'])}   {r['first_half']['expectancy_r']} / {r['second_half']['expectancy_r']}")
@@ -210,7 +215,8 @@ def cmd_lab(cfg, args) -> int:
         sh = summary(load(cfg["paths"]["state_dir"]))
         print(f"\nLive shadow mode (recorded, never sent) since {(sh['since'] or 'now')[:10]}: "
               f"{sh['patterns_recorded']} patterns, closed trades 07-16 UTC:")
-        for name in ("2R/3R", "1R/2R"):
+        from .qm_shadow import TARGETS
+        for name in TARGETS:
             print(f"  targets {name:<34}{row(sh[name])}")
         print(f"\nFull results: {res['_path']}")
         return 0
@@ -247,6 +253,7 @@ def main(argv=None) -> int:
     lb.add_argument("--refresh", action="store_true", help="reload history from TradingView instead of the cache")
     lb.add_argument("--qm", action="store_true", help="test the Quasimodo reversal (QMR) setup on its own")
     lb.add_argument("--ideas", action="store_true", help="test market-type filters and the London sweep of the Asian range")
+    lb.add_argument("--exits", action="store_true", help="test exits on the same entries: partial profit, trailing stop, R targets, time exits")
     b = sub.add_parser("backtest", help="replay strict vs adaptive rules on months of TradingView history")
     b.add_argument("--pairs", nargs="*")
     b.add_argument("--h1-bars", type=int, help="H1 bars of history to load (default 5000 ≈ 10 months)")

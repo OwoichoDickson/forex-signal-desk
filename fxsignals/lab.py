@@ -30,6 +30,8 @@ from .history import atomic_write_json
 from .instruments import instrument
 from .models import Candles
 from .signals import analyse_pair
+from . import indicators as ind
+from .structure import find_quasimodo, find_swings
 
 MAX_HOLD = 120  # H1 bars (5 days, as live)
 # signal generation settings: the old entry rules (before 4 Nov) and the current ones
@@ -49,6 +51,15 @@ RULESETS = {
     "B with old entry rules": dict(gen="old", hours=(7, 16), cooldown_h=4, breakeven=True, d1=None),
 }
 BASE = "B. Current live rules"
+# Quasimodo reversal (QMR): limit at the QM level (left shoulder), stop beyond the head, targets in R
+QM_RULESETS = {
+    "QM · targets 2R/3R (house rules)": dict(tp=(2.0, 3.0), hours=(7, 16), cooldown_h=4, breakeven=True, d1=None),
+    "QM · targets 1R/2R": dict(tp=(1.0, 2.0), hours=(7, 16), cooldown_h=4, breakeven=True, d1=None),
+    "QM · targets 1.5R/2.5R": dict(tp=(1.5, 2.5), hours=(7, 16), cooldown_h=4, breakeven=True, d1=None),
+    "QM · 2R/3R, any hour": dict(tp=(2.0, 3.0), hours=None, cooldown_h=4, breakeven=True, d1=None),
+    "QM · 2R/3R, no break-even": dict(tp=(2.0, 3.0), hours=(7, 16), cooldown_h=4, breakeven=False, d1=None),
+}
+QM_BASE = "QM · targets 2R/3R (house rules)"
 
 
 def generate(pair: str, h1: Candles, h4: Candles, d1: Optional[Candles], cfg: dict) -> list[dict]:
@@ -74,6 +85,41 @@ def generate(pair: str, h1: Candles, h4: Candles, d1: Optional[Candles], cfg: di
             "d1_agree": (det.get("d1_trend") or {}).get("agree"),
         })
     return out
+
+
+def qm_signals(pair: str, h1: Candles, h4: Candles, cfg: dict) -> list[dict]:
+    """Every Quasimodo on H1 at the bar its structure break closes (one signal per pattern)."""
+    a = cfg["analysis"]
+    width = a["swing_width"].get("H1", 3)
+    swings, atr = find_swings(h1, width), ind.atr(h1.h, h1.l, h1.c, 14)
+    e50 = ind.ema(h4.c, 50)
+    out, j4 = [], 0
+    for i in range(205, len(h1) - 1):
+        now_ts = h1.t[i] + 3600
+        while j4 + 1 < len(h4) and h4.t[j4 + 1] + 4 * 3600 <= now_ts:
+            j4 += 1  # last closed H4 bar
+        for q in find_quasimodo(h1, swings, width, i, max_break_ago=0):
+            x = atr[i]
+            if not x:
+                continue
+            bear = q.direction == "BEARISH"
+            sl = q.head + (x * a["sl_buffer_atr"] if bear else -x * a["sl_buffer_atr"])
+            risk = abs(sl - q.qml)
+            if not (a["min_sl_atr"] * x <= risk <= a["max_sl_atr"] * x) or abs(q.qml - h1.c[i]) < 0.2 * x:
+                continue
+            h4_with = None if e50[j4] is None else (h4.c[j4] < e50[j4]) == bear
+            out.append({"i": i, "t": now_ts, "hour": datetime.fromtimestamp(now_ts, timezone.utc).hour,
+                        "direction": "SELL" if bear else "BUY", "type": "SELL_LIMIT" if bear else "BUY_LIMIT",
+                        "setup": f"{q.direction}_QUASIMODO", "score": None, "entry": q.qml, "sl": sl, "risk": risk,
+                        "adx": None, "ext_atr": None, "d1_agree": None, "valid_bars": 12,
+                        "h4_trend": "with H4 trend" if h4_with else "against H4 trend" if h4_with is not None else "n/a",
+                        "risk_atr": round(risk / x, 2)})
+    return out
+
+
+def _with_targets(sigs: list[dict], tp: tuple) -> list[dict]:
+    sg = lambda s: -1 if s["direction"] == "SELL" else 1
+    return [{**s, "tp1": s["entry"] + sg(s) * tp[0] * s["risk"], "tp2": s["entry"] + sg(s) * tp[1] * s["risk"]} for s in sigs]
 
 
 def _gen_job(job: tuple) -> tuple:
@@ -106,7 +152,7 @@ def replay(pair: str, h1: Candles, sigs: list[dict], rules: dict, costs: dict) -
             fill_i = i + 1
             fill = h1.o[fill_i] + (cost if buy else -cost)
         else:
-            for j in range(i + 1, min(len(h1), i + 5)):  # pending orders live 4 hours
+            for j in range(i + 1, min(len(h1), i + 1 + s.get("valid_bars", 4))):  # pending orders live 4 hours (QM: 12)
                 hit = (h1.l[j] <= s["entry"] <= h1.h[j]) if "LIMIT" in s["type"] else (h1.h[j] >= s["entry"] if buy else h1.l[j] <= s["entry"])
                 if hit:
                     fill_i, fill = j, s["entry"] + (cost if buy else -cost)
@@ -132,7 +178,8 @@ def replay(pair: str, h1: Candles, sigs: list[dict], rules: dict, costs: dict) -
         r = ((exit_px - fill) if buy else (fill - exit_px)) / risk
         trades.append({"pair": pair, "t": s["t"], "hour": s["hour"], "direction": s["direction"], "type": s["type"],
                        "setup": s["setup"], "score": s["score"], "adx": s["adx"], "ext_atr": s["ext_atr"],
-                       "d1_agree": s["d1_agree"], "outcome": out, "r": round(r, 3)})
+                       "d1_agree": s["d1_agree"], "h4_trend": s.get("h4_trend"), "risk_atr": s.get("risk_atr"),
+                       "outcome": out, "r": round(r, 3)})
         busy_until = exit_i
         if r < 0:
             last_loss[s["direction"]] = h1.t[exit_i]
@@ -210,6 +257,41 @@ def run_lab(cfg: dict, pairs: list[str], refresh: bool = False) -> dict:
         "limitations": [__doc__.strip().split("\n\n")[-1].replace("\n", " ")],
     }
     out = Path(cfg["paths"]["state_dir"]) / "backtests" / f"lab_{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}.json"
+    atomic_write_json(out, {**result, "trades": trades})
+    result["_path"] = str(out)
+    return result
+
+
+def run_qm_lab(cfg: dict, pairs: list[str], refresh: bool = False) -> dict:
+    """The Quasimodo reversal on its own: same history, costs, replay and walk-forward split as run_lab."""
+    import asyncio
+    costs = {**DEFAULT_COSTS, **(cfg.get("backtest") or {})}
+    candles = asyncio.run(load_or_fetch(cfg, pairs, DEFAULT_HISTORY, refresh))
+    pairs = [p for p in pairs if candles.get(p, {}).get("H1") and candles[p].get("H4")]
+    first = max(candles[p]["H1"].t[0] for p in pairs) + 205 * 3600
+    last = min(candles[p]["H1"].t[-1] for p in pairs)
+    split = first + (last - first) // 2
+    sigs = {p: [s for s in qm_signals(p, candles[p]["H1"], candles[p]["H4"], cfg) if first <= s["t"] <= last] for p in pairs}
+    trades = {name: sorted((t for p in pairs for t in replay(p, candles[p]["H1"], _with_targets(sigs[p], r["tp"]), r, costs)),
+                           key=lambda t: t["t"]) for name, r in QM_RULESETS.items()}
+    base = trades[QM_BASE]
+    result = {
+        "generated_at": datetime.now(timezone.utc).isoformat(), "costs": costs, "pairs": pairs,
+        "period": {"from": datetime.fromtimestamp(first, timezone.utc).isoformat(),
+                   "split": datetime.fromtimestamp(split, timezone.utc).isoformat(),
+                   "to": datetime.fromtimestamp(last, timezone.utc).isoformat()},
+        "patterns_found": sum(len(v) for v in sigs.values()),
+        "rulesets": {name: {"overall": summarise(tr), **_halves(tr, split)} for name, tr in trades.items()},
+        "qm_by": {
+            "direction": breakdown(base, lambda t: t["direction"], split),
+            "h4_trend": breakdown(base, lambda t: t["h4_trend"], split),
+            "hour_utc": breakdown(base, lambda t: f"{t['hour']:02d}", split),
+            "pair": breakdown(base, lambda t: t["pair"], split),
+            "stop_atr": breakdown(base, lambda t: "under 1" if t["risk_atr"] < 1 else "1-2" if t["risk_atr"] < 2 else "2+", split),
+        },
+        "limitations": [__doc__.strip().split("\n\n")[-1].replace("\n", " ")],
+    }
+    out = Path(cfg["paths"]["state_dir"]) / "backtests" / f"lab_qm_{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}.json"
     atomic_write_json(out, {**result, "trades": trades})
     result["_path"] = str(out)
     return result

@@ -338,3 +338,48 @@ def analyze(c: Candles, atr_series: list, adx_value: Optional[float], width: int
                 rep.trend = "RANGING"
     rep._swings = swings  # type: ignore[attr-defined]  # kept for level selection, not serialised
     return rep
+
+
+@dataclass
+class Quasimodo:
+    """Quasimodo reversal (QM / QMR). Bearish: left shoulder high, a low, a higher high (the head), then a
+    close below that low (structure broken). The left shoulder price is the QM level (QML) where price
+    is expected to return and turn; the trade is invalid above the head. Bullish is the mirror."""
+    direction: str       # BEARISH / BULLISH (the reversal direction)
+    qml: float           # left shoulder: the entry level
+    head: float          # invalidation: the stop goes beyond it
+    broken: float        # the low (high) the break closed through
+    break_idx: int
+    bars_since_break: int
+
+
+def find_quasimodo(c: Candles, swings: list[Swing], width: int = 3, i: Optional[int] = None,
+                   max_break_ago: int = 12, lookback: int = 80) -> list[Quasimodo]:
+    """QM patterns standing at bar ``i`` (default: the last bar): structure broken within ``max_break_ago``
+    bars, price not back above the head (below, for bullish) and not yet returned to the QML."""
+    i = len(c) - 1 if i is None else i
+    sw = [s for s in swings if s.idx + width <= i and s.idx >= i - lookback]  # only swings confirmed by bar i
+    out: list[Quasimodo] = []
+    for bear in (True, False):
+        hk, lk = ("H", "L") if bear else ("L", "H")
+        heads = [s for s in sw if s.kind == hk]
+        for n in range(len(heads) - 1, max(0, len(heads) - 4), -1):  # the three most recent candidates
+            hb, ha = heads[n], heads[n - 1]
+            if not (hb.price > ha.price if bear else hb.price < ha.price):
+                continue
+            mids = [s for s in sw if s.kind == lk and ha.idx < s.idx < hb.idx]
+            if not mids:
+                continue
+            la = min(mids, key=lambda s: s.price) if bear else max(mids, key=lambda s: s.price)
+            k = next((j for j in range(hb.idx + 1, i + 1) if (c.c[j] < la.price if bear else c.c[j] > la.price)), None)
+            if k is None or i - k > max_break_ago:
+                break
+            after = range(hb.idx + 1, i + 1)
+            if bear and max(c.h[j] for j in after) > hb.price or not bear and min(c.l[j] for j in after) < hb.price:
+                break  # head taken out: no longer a reversal
+            back = range(k, i + 1)
+            if bear and max(c.h[j] for j in back) >= ha.price or not bear and min(c.l[j] for j in back) <= ha.price:
+                break  # already returned to the QML
+            out.append(Quasimodo("BEARISH" if bear else "BULLISH", ha.price, hb.price, la.price, k, i - k))
+            break
+    return out

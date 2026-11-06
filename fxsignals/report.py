@@ -24,6 +24,8 @@ def _signal_out(s: dict) -> dict:
         "tradingview_symbol": s.get("tradingview_symbol"), "live": s.get("live"),
         "position_size": s.get("position_size"), "portfolio": s.get("portfolio"), "risk_status": s.get("risk_status"),
         "details": s.get("details"),
+        # trade style (SCALP / QMR; none = intraday) and its timing, so the dashboard can tag and filter it
+        "style": s.get("style"), "max_hold_minutes": s.get("max_hold_minutes"), "entry_minutes": s.get("entry_minutes"),
     })
     return out
 

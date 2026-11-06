@@ -18,3 +18,9 @@ def test_qmr_signal_is_a_limit_at_the_qm_level_with_stop_beyond_the_head():
     assert "🧪 QMR" in fmt_signal({**s, "signal_id": "x"}, None)
     off = {**cfg, "qmr": {**cfg["qmr"], "enabled": False}}
     assert decide_qmr("EURUSD", c, {"H1": analyse_timeframe(c, off)}, None, PairFundamentals(available=False), off, True) is None
+
+
+def test_report_keeps_the_trade_style():
+    from fxsignals.report import _signal_out
+    assert _signal_out({"style": "QMR", "entry_minutes": 720})["style"] == "QMR"
+    assert _signal_out({"style": "SCALP", "max_hold_minutes": 120})["max_hold_minutes"] == 120

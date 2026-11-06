@@ -351,7 +351,7 @@ function renderSignals() {
       const d = s.details || {};
       rows.push(`<tr class="detail"><td></td><td colspan="7" class="wrap small">
         <div><b>${esc(s.market_structure)}</b> · trend ${esc(s.trend)} · momentum ${esc(s.momentum)} · aligned ${esc(s.timeframe_alignment)} · volatility ${esc(d.volatility)} · stop ${esc(d.stop_distance_pips)} pips · spread ${esc(d.spread_pips)} pips · R:R by target ${esc((d.risk_reward_by_target || []).join(", "))}</div>
-        <div>Score: HTF ${esc(b.higher_timeframe_alignment)}/25 · indicators ${esc(b.technical_indicators)}/20 · structure ${esc(b.market_structure)}/25 · momentum ${esc(b.momentum)}/15 · fundamental ${esc(b.fundamental)}/15 ${(b.notes || []).length ? "· " + esc(b.notes.join("; ")) : ""}</div>
+        ${d.qmr_score ? `<div>QMR score ${esc(s.confidence_score)} = 40 + 10 per point (${esc(d.qmr_score.points.length)}/${esc(d.qmr_score.of)}): ${esc(d.qmr_score.points.join("; ") || "no points")} · <span class="muted">evidence ${esc(d.qmr_score.evidence)}</span></div>` : `<div>Score: HTF ${esc(b.higher_timeframe_alignment)}/25 · indicators ${esc(b.technical_indicators)}/20 · structure ${esc(b.market_structure)}/25 · momentum ${esc(b.momentum)}/15 · fundamental ${esc(b.fundamental)}/15 ${(b.notes || []).length ? "· " + esc(b.notes.join("; ")) : ""}</div>`}
         <div>Position: ${esc(ps.lots)} lots (${esc(ps.units)} units), risk ${esc(ps.actual_risk_amount)} ${esc(ps.account_currency)}, pip value/lot ${esc(ps.pip_value_per_lot)}</div>
         <div style="margin-top:6px">${techRow(s, f.tf)}</div>
         <div style="margin-top:6px"><b>Reason:</b> ${esc(s.reason)}</div>

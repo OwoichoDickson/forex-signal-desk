@@ -24,3 +24,11 @@ def test_report_keeps_the_trade_style():
     from fxsignals.report import _signal_out
     assert _signal_out({"style": "QMR", "entry_minutes": 720})["style"] == "QMR"
     assert _signal_out({"style": "SCALP", "max_hold_minutes": 120})["max_hold_minutes"] == 120
+
+
+def test_qmr_score_counts_its_points():
+    from fxsignals.signals import QMR_POINTS, qmr_score
+    top, got = qmr_score(True, 1.1, 1.0, 40, 0.8, 14, 0.15)
+    assert top == 40 + 10 * len(QMR_POINTS) and len(got) == len(QMR_POINTS)
+    low, got = qmr_score(True, 1.0, 1.1, 10, 2.5, 8, 0.4)  # EMAs against, weak H4, wide stop, London, trending
+    assert (low, got) == (40, [])

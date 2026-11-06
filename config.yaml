@@ -82,7 +82,6 @@ qmr:                             # 🧪 QMR (Quasimodo reversal) signals on H1, 
   targets_r: [1.0, 2.0, 3.0]     # TP1 (stop to entry) / TP2 (main) / TP3 — 1R/2R did least badly in the lab
   entry_minutes: 720             # the limit order waits up to 12 hours for price to return to the QM level
   max_break_bars_ago: 3          # structure broke within the last 3 H1 bars
-  confidence: 60                 # fixed: the usual score does not apply to this pattern
   top_n: 5
 
 qm_shadow:                       # QMR (Quasimodo reversal): recorded + tracked, never sent (lost in the lab); see 'lab --qm'

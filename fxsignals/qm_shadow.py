@@ -46,7 +46,7 @@ def update(state_dir, h1: dict[str, Candles], h4: dict[str, Candles], cfg: dict,
             seen.add(key)
             records.append({"key": key, "symbol": pair, "bar_t": c.t[s["i"]], "recorded_at": now.isoformat(),
                             **{k: s[k] for k in ("t", "hour", "direction", "type", "setup", "entry", "sl", "risk",
-                                                 "valid_bars", "h4_trend", "risk_atr")},
+                                                 "valid_bars", "h4_trend", "risk_atr", "score")},
                             "results": {}})
     for r in records:
         c = h1.get(r["symbol"])

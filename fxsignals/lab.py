@@ -29,8 +29,9 @@ from .fundamentals import PairFundamentals
 from .history import atomic_write_json
 from .instruments import instrument
 from .models import Candles
-from .signals import analyse_pair
+from .signals import analyse_pair, qmr_score
 from . import indicators as ind
+from .indicators import efficiency
 from .structure import find_quasimodo, find_swings
 
 MAX_HOLD = 120  # H1 bars (5 days, as live)
@@ -93,7 +94,8 @@ def qm_signals(pair: str, h1: Candles, h4: Candles, cfg: dict, start: int = 205,
     a = cfg["analysis"]
     width = a["swing_width"].get("H1", 3)
     swings, atr = find_swings(h1, width), ind.atr(h1.h, h1.l, h1.c, 14)
-    e50 = ind.ema(h4.c, 50)
+    e50, adx4 = ind.ema(h4.c, 50), ind.adx(h4.h, h4.l, h4.c, 14).adx
+    e20h, e50h = ind.ema(h1.c, 20), ind.ema(h1.c, 50)
     out, j4 = [], 0
     for i in range(start, len(h1) - 1 if end is None else end):
         now_ts = h1.t[i] + 3600
@@ -109,9 +111,11 @@ def qm_signals(pair: str, h1: Candles, h4: Candles, cfg: dict, start: int = 205,
             if not (a["min_sl_atr"] * x <= risk <= a["max_sl_atr"] * x) or abs(q.qml - h1.c[i]) < 0.2 * x:
                 continue
             h4_with = None if e50[j4] is None else (h4.c[j4] < e50[j4]) == bear
-            out.append({"i": i, "t": now_ts, "hour": datetime.fromtimestamp(now_ts, timezone.utc).hour,
+            hour = datetime.fromtimestamp(now_ts, timezone.utc).hour
+            score, _ = qmr_score(not bear, e20h[i], e50h[i], adx4[j4], risk / x, hour, efficiency(h1.c, i))
+            out.append({"i": i, "t": now_ts, "hour": hour,
                         "direction": "SELL" if bear else "BUY", "type": "SELL_LIMIT" if bear else "BUY_LIMIT",
-                        "setup": f"{q.direction}_QUASIMODO", "score": None, "entry": q.qml, "sl": sl, "risk": risk,
+                        "setup": f"{q.direction}_QUASIMODO", "score": score, "entry": q.qml, "sl": sl, "risk": risk,
                         "adx": None, "ext_atr": None, "d1_agree": None, "valid_bars": 12,
                         "h4_trend": "with H4 trend" if h4_with else "against H4 trend" if h4_with is not None else "n/a",
                         "risk_atr": round(risk / x, 2)})
@@ -314,14 +318,6 @@ def run_qm_lab(cfg: dict, pairs: list[str], refresh: bool = False) -> dict:
 
 
 # ---- ideas lab: market type (trending / ranging) and the London-open sweep of the Asian range ----
-
-def efficiency(c: list[float], i: int, n: int = 48) -> Optional[float]:
-    """Kaufman efficiency ratio over n bars: net move / path length. Near 1 = clean trend, near 0 = chop."""
-    if i < n:
-        return None
-    path = sum(abs(c[k] - c[k - 1]) for k in range(i - n + 1, i + 1))
-    return abs(c[i] - c[i - n]) / path if path else None
-
 
 def _regime_fields(h1: Candles, h4: Candles, h4_adx: list) -> callable:
     """Attach the market type at signal time: H1 efficiency ratio (48 bars) and H4 ADX of the last closed H4 bar."""

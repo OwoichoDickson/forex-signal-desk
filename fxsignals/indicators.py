@@ -188,3 +188,11 @@ def percentile_rank(series: Sequence[Num], lookback: int = 100) -> Num:
         return None
     cur = vals[-1]
     return 100.0 * sum(1 for v in vals if v <= cur) / len(vals)
+
+
+def efficiency(c: list[float], i: int, n: int = 48) -> Optional[float]:
+    """Kaufman efficiency ratio over n bars: net move / path length. Near 1 = clean trend, near 0 = chop."""
+    if i < n:
+        return None
+    path = sum(abs(c[k] - c[k - 1]) for k in range(i - n + 1, i + 1))
+    return abs(c[i] - c[i - n]) / path if path else None

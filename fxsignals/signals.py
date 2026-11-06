@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from . import indicators as ind
@@ -178,6 +178,27 @@ def analyse_pair(pair: str, candles: dict[str, Optional[Candles]], quote: Option
     return res
 
 
+# QMR score: 40 + 10 per point. The points are the conditions that did better on the first half of the lab
+# history (Jan–Jun 2026). On the second half, which they were not chosen on, the top half of scores lost
+# −0.01R a trade against −0.11R for the rest, and 0–1 points lost in both halves: weak evidence, not proof.
+QMR_POINTS = (
+    ("H1 EMA20 vs EMA50 points the trade's way", lambda f: f["h1_with"]),
+    ("H4 ADX 35 or more (strong H4 move)", lambda f: (f["h4_adx"] or 0) >= 35),
+    ("stop under 2 ATR", lambda f: f["risk_atr"] < 2.0),
+    ("stop under 1 ATR", lambda f: f["risk_atr"] < 1.0),
+    ("13:00 UTC or later (New York session)", lambda f: f["hour"] >= 13),
+    ("H1 drifting (efficiency 0.1–0.2)", lambda f: f["er"] is not None and 0.1 <= f["er"] < 0.2),
+)
+
+
+def qmr_score(buy: bool, ema20, ema50, h4_adx, risk_atr: float, hour: int, er) -> tuple[int, list[str]]:
+    """(confidence 40–100, the points it earned) for a Quasimodo, the same in the lab and live."""
+    f = {"h1_with": ema20 is not None and ema50 is not None and (ema20 > ema50) == buy,
+         "h4_adx": h4_adx, "risk_atr": risk_atr, "hour": hour, "er": er}
+    got = [name for name, test in QMR_POINTS if test(f)]
+    return 40 + 10 * len(got), got
+
+
 def decide_qmr(pair: str, h1c: Optional[Candles], tfa: dict[str, TFAnalysis], quote: Optional[Quote],
                fund: PairFundamentals, cfg: dict, market_open: bool) -> Optional[dict[str, Any]]:
     """🧪 QMR (Quasimodo reversal) on H1, sent as its own style: a limit order at the QM level (left shoulder)
@@ -203,6 +224,10 @@ def decide_qmr(pair: str, h1c: Optional[Candles], tfa: dict[str, TFAnalysis], qu
         return None  # stop too tight/wide, or price already at the QM level
     tr = q.get("targets_r", [1.0, 2.0, 3.0])
     tps = [p.qml + sgn * r * risk for r in tr]
+    h4 = tfa.get("H4")
+    hour = datetime.fromtimestamp(h1c.t[-1] + 3600, timezone.utc).hour  # when the last H1 bar closed
+    score, points = qmr_score(not bear, h1.ema20, h1.ema50, h4.adx if h4 else None, risk / atr, hour,
+                              ind.efficiency(h1c.c, len(h1c) - 1))
     status = "PENDING" if market_open else "MARKET_CLOSED"
     side = "BULLISH" if not bear else "BEARISH"
     alignment = ",".join(tf for tf in ("M15", "H1", "H4", "D1") if tf in tfa and tfa[tf].bias == side)
@@ -212,7 +237,7 @@ def decide_qmr(pair: str, h1c: Optional[Candles], tfa: dict[str, TFAnalysis], qu
         "direction": "SELL" if bear else "BUY", "signal_type": "SELL_LIMIT" if bear else "BUY_LIMIT",
         "entry_price": inst.round_price(p.qml), "stop_loss": inst.round_price(stop),
         "take_profit_1": inst.round_price(tps[0]), "take_profit_2": inst.round_price(tps[1]), "take_profit_3": inst.round_price(tps[2]),
-        "risk_reward": f"1:{tr[1]:.1f}", "confidence_score": q.get("confidence", 60), "trend": side,
+        "risk_reward": f"1:{tr[1]:.1f}", "confidence_score": score, "trend": side,
         "momentum": "MODERATE" if (h1.adx or 0) >= 20 else "WEAK",
         "rsi": _r(h1.rsi, 1), "ema_20": inst.round_price(h1.ema20), "ema_50": inst.round_price(h1.ema50),
         "atr": _r(atr, inst.price_decimals + 1), "timeframe_alignment": alignment,
@@ -226,6 +251,8 @@ def decide_qmr(pair: str, h1c: Optional[Candles], tfa: dict[str, TFAnalysis], qu
             "risk_reward_by_target": [f"1:{r:.2f}" for r in tr],
             "stop_distance_pips": round(inst.to_pips(risk), 1),
             "atr_h1_pips": round(inst.to_pips(atr), 1),
+            "qmr_score": {"points": points, "of": len(QMR_POINTS),
+                          "evidence": "weak: on unseen history the top half of scores lost −0.01R a trade vs −0.11R for the rest"},
             "quasimodo": {"qml": inst.round_price(p.qml), "head": inst.round_price(p.head),
                           "broken": inst.round_price(p.broken), "bars_since_break": p.bars_since_break},
             "surprises": fund.surprises, "upcoming_high_impact": [e.to_dict() for e in fund.upcoming_high],

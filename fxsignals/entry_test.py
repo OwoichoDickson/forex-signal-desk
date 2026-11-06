@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from .backtest import DEFAULT_COSTS, LOOKBACK, _slice_closed, fetch_history, summarise
+from .backtest import DEFAULT_COSTS, LOOKBACK, _slice_closed, fetch_history, spread_pips_for, summarise
 from .fundamentals import PairFundamentals
 from .history import atomic_write_json
 from .instruments import instrument
@@ -68,7 +68,7 @@ def _leg(h1, buy, fill_i, fill, sl, tp, slip) -> tuple[float, int, str]:
 
 def simulate(pair: str, h1: Candles, sigs: list[dict], variant: str, cfg: dict, costs: dict) -> dict:
     inst = instrument(pair)
-    spread = costs["xau_spread_pips"] if inst.is_metal else costs["jpy_spread_pips"] if inst.is_jpy else costs["spread_pips"]
+    spread = spread_pips_for(inst, costs)
     cost = (spread + costs["slippage_pips"]) * inst.pip_size
     slip = costs["slippage_pips"] * inst.pip_size
     min_rr = cfg["signals"]["min_risk_reward"]
@@ -133,14 +133,15 @@ def _signals_job(job):
 
 async def load_or_fetch(cfg: dict, pairs: list[str], targets: dict, refresh: bool = False) -> dict:
     cache = Path(cfg["paths"]["state_dir"]) / "backtests" / "history_cache.pkl"
-    if cache.exists() and not refresh:
-        data = pickle.loads(cache.read_bytes())
-        if set(pairs) <= set(data):
-            return data
-    _, candles = await fetch_history(cfg, pairs, targets)
+    data = pickle.loads(cache.read_bytes()) if cache.exists() and not refresh else {}
+    missing = [p for p in pairs if p not in data]
+    if not missing:
+        return data
+    _, candles = await fetch_history(cfg, missing, targets)  # only the new instruments; the rest keep their period
+    data.update(candles)
     cache.parent.mkdir(parents=True, exist_ok=True)
-    cache.write_bytes(pickle.dumps(candles))
-    return candles
+    cache.write_bytes(pickle.dumps(data))
+    return data
 
 
 async def run_entry_test(cfg: dict, pairs: list[str], targets: dict, refresh: bool = False) -> dict:

@@ -18,6 +18,7 @@ pairs:
   majors: [EURUSD, GBPUSD, USDJPY, USDCHF, AUDUSD, NZDUSD, USDCAD]
   crosses: [EURGBP, EURJPY, GBPJPY, GBPCHF, EURAUD, EURCHF, AUDJPY, AUDNZD, GBPAUD, GBPCAD, CADJPY, CHFJPY]
   metals: [XAUUSD]
+  crypto: [BTCUSD]               # 24/7 market, scanned on the same days and hours as the rest
 
 data:
   preferred_exchanges: [OANDA, FXCM, FOREXCOM]   # first match from symbol_search wins
@@ -108,7 +109,7 @@ news_filter:
   summary_hours: 72
 
 spreads:
-  max_spread_pips: {DEFAULT: 3.0, JPY_CROSS: 4.0, GBPAUD: 5.0, GBPCAD: 5.0, EURAUD: 4.5, GBPCHF: 4.5, AUDNZD: 4.5, XAUUSD: 6.0}
+  max_spread_pips: {DEFAULT: 3.0, JPY_CROSS: 4.0, GBPAUD: 5.0, GBPCAD: 5.0, EURAUD: 4.5, GBPCHF: 4.5, AUDNZD: 4.5, XAUUSD: 6.0, BTCUSD: 100.0}  # BTC pips are $1
   max_spread_to_stop_ratio: 0.15
 
 risk:

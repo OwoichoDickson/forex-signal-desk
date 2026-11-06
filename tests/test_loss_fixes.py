@@ -116,3 +116,15 @@ def test_repeats_of_a_running_trade_count_once():
             {**base, "signal_id": "c", "filled_at": "2026-11-05T13:00"},           # after 'a' closed: new trade
             {**base, "signal_id": "d", "style": "QMR", "filled_at": "2026-11-04T14:00"}]  # other style: own trade
     assert repeats(recs) == {"b": "a"}
+
+
+def test_bitcoin_is_one_coin_per_lot_and_trades_all_week():
+    from datetime import datetime, timezone
+    from fxsignals.backtest import DEFAULT_COSTS, spread_pips_for
+    from fxsignals.instruments import instrument
+    from fxsignals.market_hours import is_instrument_open
+    btc = instrument("BTCUSD")
+    assert btc.is_crypto and btc.pip_size == 1.0 and btc.pip_value_per_lot_quote() == 1.0
+    assert spread_pips_for(btc, DEFAULT_COSTS) == DEFAULT_COSTS["btc_spread_pips"]
+    saturday = datetime(2026, 11, 7, 12, tzinfo=timezone.utc)
+    assert is_instrument_open("BTCUSD", saturday) and not is_instrument_open("EURUSD", saturday)

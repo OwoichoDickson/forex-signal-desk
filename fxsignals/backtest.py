@@ -25,7 +25,14 @@ from .mcp_client import TradingViewMCP
 from .models import TF_SECONDS, Candles
 from .signals import analyse_pair
 
-DEFAULT_COSTS = {"spread_pips": 1.5, "jpy_spread_pips": 2.0, "xau_spread_pips": 4.0, "slippage_pips": 0.5}
+# BTC: 1 pip = $1; $50 spread is an assumption (OANDA does not publish it through TradingView), change under backtest:
+DEFAULT_COSTS = {"spread_pips": 1.5, "jpy_spread_pips": 2.0, "xau_spread_pips": 4.0, "btc_spread_pips": 50.0, "slippage_pips": 0.5}
+
+
+def spread_pips_for(inst, costs: dict) -> float:
+    if inst.is_crypto:
+        return costs.get("btc_spread_pips", DEFAULT_COSTS["btc_spread_pips"])
+    return costs["xau_spread_pips"] if inst.is_metal else costs["jpy_spread_pips"] if inst.is_jpy else costs["spread_pips"]
 DEFAULT_HISTORY = {"H1": 5000, "H4": 2000, "D1": 800}
 LOOKBACK = 300  # bars per timeframe a live scan analyses
 MIN_MEANINGFUL_TRADES = 100
@@ -39,7 +46,7 @@ def _slice_closed(c: Candles, until_ts: int) -> Candles:
 
 def simulate_pair(pair: str, h1: Candles, h4: Candles, d1: Optional[Candles], cfg: dict, costs: dict) -> list[dict]:
     inst = instrument(pair)
-    spread = costs["xau_spread_pips"] if inst.is_metal else costs["jpy_spread_pips"] if inst.is_jpy else costs["spread_pips"]
+    spread = spread_pips_for(inst, costs)
     cost = (spread + costs["slippage_pips"]) * inst.pip_size
     trades: list[dict] = []
     start = max(cfg["analysis"]["min_bars"], 205)

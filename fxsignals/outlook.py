@@ -194,7 +194,7 @@ def currency_strength(candles: dict[str, dict[str, Optional[Candles]]]) -> list[
     acc: dict[str, dict[str, list[float]]] = {}
     for pair, tfs in candles.items():
         base, quote = pair[:3], pair[3:6]
-        if "XAU" in (base, quote):
+        if {"XAU", "BTC"} & {base, quote}:
             continue
         for key, val in (("day", pct_change(tfs.get("H1"), 24)), ("week", pct_change(tfs.get("D1"), 5))):
             if val is None:

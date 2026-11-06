@@ -677,7 +677,7 @@ def _targets(entry: float, risk: float, tfs: list[TFAnalysis], bull: bool, atr: 
               if lv.touches >= 2 and 0.3 * risk < sgn * (lv.price - entry) < sig["min_risk_reward"] * risk]
     if strong:
         lv = min(strong, key=lambda lv: sgn * (lv.price - entry))
-        raise Wait(f"{'Resistance' if bull else 'Support'} at {lv.price:.5f} ({lv.touches} touches) caps reward at "
+        raise Wait(f"{'Resistance' if bull else 'Support'} at {lv.price:.6g} ({lv.touches} touches) caps reward at "
                    f"1:{sgn * (lv.price - entry) / risk:.2f}", "POOR_RR")
     front = a["tp_front_run_atr"] * atr
     tp1 = entry + sgn * sig["min_risk_reward"] * risk

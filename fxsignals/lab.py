@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from .backtest import DEFAULT_COSTS, DEFAULT_HISTORY, LOOKBACK, _slice_closed, summarise
+from .backtest import DEFAULT_COSTS, DEFAULT_HISTORY, LOOKBACK, _slice_closed, spread_pips_for, summarise
 from .entry_test import load_or_fetch
 from .fundamentals import PairFundamentals
 from .history import atomic_write_json
@@ -139,7 +139,7 @@ def _gen_job(job: tuple) -> tuple:
 def replay(pair: str, h1: Candles, sigs: list[dict], rules: dict, costs: dict) -> list[dict]:
     """Trade the accepted signals in time order, one trade at a time per pair."""
     inst = instrument(pair)
-    spread = costs["xau_spread_pips"] if inst.is_metal else costs["jpy_spread_pips"] if inst.is_jpy else costs["spread_pips"]
+    spread = spread_pips_for(inst, costs)
     cost, slip = (spread + costs["slippage_pips"]) * inst.pip_size, costs["slippage_pips"] * inst.pip_size
     trades, busy_until, last_loss = [], -1, {}
     for s in sigs:
@@ -378,13 +378,13 @@ def _live_signals(cfg: dict, pairs: list[str], candles: dict, refresh: bool) -> 
     """The current engine's signals on every bar, cached (generation is the slow part of the lab)."""
     import pickle
     cache = Path(cfg["paths"]["state_dir"]) / "backtests" / "lab_live_signals.pkl"
-    if cache.exists() and not refresh:
-        data = pickle.loads(cache.read_bytes())
-        if set(pairs) <= set(data):
-            return data
-    jobs = [(p, "live", candles[p]["H1"], candles[p]["H4"], candles[p].get("D1"), cfg) for p in pairs]
+    data = pickle.loads(cache.read_bytes()) if cache.exists() and not refresh else {}
+    missing = [p for p in pairs if p not in data]
+    if not missing:
+        return data
+    jobs = [(p, "live", candles[p]["H1"], candles[p]["H4"], candles[p].get("D1"), cfg) for p in missing]
     with ProcessPoolExecutor(max_workers=max(1, (os.cpu_count() or 2) - 1)) as ex:
-        data = {pair: sigs for pair, _, sigs in ex.map(_gen_job, jobs)}
+        data.update({pair: sigs for pair, _, sigs in ex.map(_gen_job, jobs)})
     cache.write_bytes(pickle.dumps(data))
     return data
 

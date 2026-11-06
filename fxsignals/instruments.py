@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from typing import Mapping, Optional
 
 
+CRYPTO = ("BTC",)  # traded around the clock; not a currency in the strength table or the calendar
+
+
 @dataclass(frozen=True)
 class Instrument:
     name: str           # e.g. "EURUSD"
@@ -22,6 +25,10 @@ class Instrument:
     def is_metal(self) -> bool:
         return self.base in ("XAU", "XAG")
 
+    @property
+    def is_crypto(self) -> bool:
+        return self.base in CRYPTO
+
     def to_pips(self, price_distance: float) -> float:
         return abs(price_distance) / self.pip_size
 
@@ -36,6 +43,9 @@ class Instrument:
 def instrument(name: str) -> Instrument:
     name = name.upper()
     base, quote = name[:3], name[3:6]
+    if base in CRYPTO:
+        # Bitcoin CFD: 1 lot = 1 BTC, 1 pip = $1 (so 1 pip per lot = $1), 2-decimal quotes.
+        return Instrument(name, base, quote, 1.0, 1.0, 2)
     if base == "XAU":
         # Gold: 1 lot = 100 oz, 1 pip = $0.10 (so 1 pip per lot = $10), 2-decimal quotes.
         return Instrument(name, base, quote, 0.1, 100.0, 2)

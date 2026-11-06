@@ -25,6 +25,7 @@ CCY_KEYWORDS = {
     "NZD": ["kiwi", "rbnz", "new zealand", "nzd"],
     "CAD": ["loonie", "boc", "bank of canada", "canada", "canadian", "cad"],
     "XAU": ["gold", "bullion", "xau"],
+    "BTC": ["bitcoin", "btc", "crypto", "cryptocurrency"],
 }
 CCY_PATTERNS = {c: re.compile(r"\b(" + "|".join(re.escape(k) for k in kws) + r")\b", re.I) for c, kws in CCY_KEYWORDS.items()}
 # Higher-than-forecast prints that are negative for the currency.
@@ -121,7 +122,7 @@ def pair_currencies(pair: str) -> tuple[str, str]:
 def analyse_pair(pair: str, events: Optional[list[CalendarEvent]], headlines: Optional[list[dict]], now: datetime,
                  blackout_before_min: int = 60, blackout_after_min: int = 15, caution_hours: int = 4) -> PairFundamentals:
     base, quote = pair_currencies(pair)
-    ccys = {base, quote} - {"XAU"}
+    ccys = {base, quote} - {"XAU", "BTC"}
     if events is None:
         return PairFundamentals(available=False, headlines=filter_headlines(headlines, pair, now))
     window_start = now - timedelta(minutes=blackout_after_min)
@@ -134,7 +135,7 @@ def analyse_pair(pair: str, events: Optional[list[CalendarEvent]], headlines: Op
         upcoming_high=[e for e in rel if blackout_end < e.date <= caution_end],
         headlines=filter_headlines(headlines, pair, now),
     )
-    b_score, b_used = currency_surprise_bias(events, base, now) if base != "XAU" else (0, [])
+    b_score, b_used = currency_surprise_bias(events, base, now) if base not in ("XAU", "BTC") else (0, [])
     q_score, q_used = currency_surprise_bias(events, quote, now)
     pf.surprises = b_used + q_used
     pf.bias = b_score - q_score

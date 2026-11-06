@@ -255,13 +255,13 @@ def breakout_retest(c: Candles, levels_source: list[Swing], atr_value: float, lo
                 touch = [j for j in after if c.l[j] <= lvl + tol]
                 if touch and all(c.c[j] > lvl - tol for j in range(i + 1, n)):
                     j = touch[-1]
-                    out.append(Event("BREAKOUT_RETEST", "BULLISH", lvl, c.t[j], n - 1 - j, f"broke {lvl:.5f}, retested and held"))
+                    out.append(Event("BREAKOUT_RETEST", "BULLISH", lvl, c.t[j], n - 1 - j, f"broke {lvl:.6g}, retested and held"))
                 break
             if s.kind == "L" and c.c[i] < lvl and c.c[i - 1] >= lvl:
                 touch = [j for j in range(i + 1, n) if c.h[j] >= lvl - tol]
                 if touch and all(c.c[j] < lvl + tol for j in range(i + 1, n)):
                     j = touch[-1]
-                    out.append(Event("BREAKOUT_RETEST", "BEARISH", lvl, c.t[j], n - 1 - j, f"broke {lvl:.5f}, retested and held"))
+                    out.append(Event("BREAKOUT_RETEST", "BEARISH", lvl, c.t[j], n - 1 - j, f"broke {lvl:.6g}, retested and held"))
                 break
     return out
 
@@ -276,11 +276,11 @@ def liquidity_sweeps(c: Candles, swings: list[Swing], lookback: int = 3) -> list
         if prior_h:
             s = prior_h[-1]
             if c.h[i] > s.price and c.c[i] < s.price:
-                out.append(Event("LIQUIDITY_SWEEP", "BEARISH", s.price, c.t[i], n - 1 - i, f"swept high {s.price:.5f}, closed back below"))
+                out.append(Event("LIQUIDITY_SWEEP", "BEARISH", s.price, c.t[i], n - 1 - i, f"swept high {s.price:.6g}, closed back below"))
         if prior_l:
             s = prior_l[-1]
             if c.l[i] < s.price and c.c[i] > s.price:
-                out.append(Event("LIQUIDITY_SWEEP", "BULLISH", s.price, c.t[i], n - 1 - i, f"swept low {s.price:.5f}, closed back above"))
+                out.append(Event("LIQUIDITY_SWEEP", "BULLISH", s.price, c.t[i], n - 1 - i, f"swept low {s.price:.6g}, closed back above"))
     return out
 
 

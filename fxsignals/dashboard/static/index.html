@@ -272,7 +272,7 @@ function sizeFor(s) {
   return { ...ps, lots: +lots.toFixed(2), actual_risk_amount: +(lots * pips * pv).toFixed(2), min_lot_risk: +minRisk.toFixed(2),
     micro_lots: +micro.toFixed(3), micro_risk: +(micro * pips * pv).toFixed(2), note };
 }
-const pip = (sym) => sym.startsWith("XAU") ? 0.1 : sym.endsWith("JPY") ? 0.01 : 0.0001;
+const pip = (sym) => sym.startsWith("BTC") ? 1 : sym.startsWith("XAU") ? 0.1 : sym.endsWith("JPY") ? 0.01 : 0.0001;
 
 function filters() { return { pair: $("#fPair").value, tf: $("#fTf").value, dir: $("#fDir").value, conf: +$("#fConf").value || 0, style: $("#fStyle").value }; }
 // a running scalp: when the 2-hour limit ends
@@ -671,7 +671,7 @@ async function drawChart() {
     grid: { vertLines: { color: dark ? "#222831" : "#eef0f3" }, horzLines: { color: dark ? "#222831" : "#eef0f3" } },
     timeScale: { timeVisible: true, secondsVisible: false }, rightPriceScale: { borderVisible: false } });
   const s = chart.addCandlestickSeries({ upColor: "#12805c", downColor: "#c4314b", borderVisible: false, wickUpColor: "#12805c", wickDownColor: "#c4314b",
-    priceFormat: { type: "price", precision: pair.startsWith("XAU") ? 2 : pair.endsWith("JPY") ? 3 : 5, minMove: pair.startsWith("XAU") ? 0.01 : pair.endsWith("JPY") ? 0.001 : 0.00001 } });
+    priceFormat: { type: "price", precision: pair.startsWith("XAU") || pair.startsWith("BTC") ? 2 : pair.endsWith("JPY") ? 3 : 5, minMove: pair.startsWith("XAU") || pair.startsWith("BTC") ? 0.01 : pair.endsWith("JPY") ? 0.001 : 0.00001 } });
   s.setData(t.candles.map(([time, open, high, low, close]) => ({ time, open, high, low, close })));
   [["ema20", "#e3a008"], ["ema50", "#2f80ed"], ["ema200", "#9b59b6"]].forEach(([k, color]) => {
     const l = chart.addLineSeries({ color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false });

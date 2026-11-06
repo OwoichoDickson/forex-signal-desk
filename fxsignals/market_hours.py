@@ -31,6 +31,8 @@ def is_metal_open(now: datetime) -> bool:
 
 
 def is_instrument_open(name: str, now: datetime) -> bool:
+    if name.upper().startswith("BTC"):
+        return True  # crypto trades 24/7
     return is_metal_open(now) if name.upper().startswith(("XAU", "XAG")) else is_fx_open(now)
 
 

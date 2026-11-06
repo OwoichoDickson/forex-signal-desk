@@ -52,4 +52,4 @@ def load_config(path: str | os.PathLike | None = None) -> dict[str, Any]:
 
 def all_pairs(cfg: dict) -> list[str]:
     p = cfg["pairs"]
-    return [*p["majors"], *p["crosses"], *p["metals"]]
+    return [*p["majors"], *p["crosses"], *p["metals"], *p.get("crypto", [])]

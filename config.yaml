@@ -129,6 +129,7 @@ risk:
 scan:
   interval_minutes: 10           # (env) FXSIG_SCAN_INTERVAL_MINUTES
   keep_awake: true               # macOS: block idle sleep while the scanner runs (a closed lid on battery still sleeps)
+  auto_reopen_tradingview: true  # TradingView unreachable on port 9222 (e.g. after a restart): quit and reopen it with the port
   min_seconds_between_scans: 300 # duplicate-scan protection (override with --force)
   scan_when_market_closed: false # scheduled scans skip the weekend; manual --force still works
   scan_days: [Mon, Tue, Wed, Thu, Fri]  # automatic scans only on these days (manual --force still works)

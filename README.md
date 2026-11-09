@@ -150,7 +150,8 @@ scripts/service.sh uninstall
 
 Things to keep in mind:
 
-* TradingView must stay open **with port 9222** (step 4). After a restart, open it with that command again.
+* TradingView must stay open **with port 9222** (step 4). If it is closed or opened without the port (macOS reopens it
+  that way after a restart), the scanner quits and reopens it with the port by itself (`scan: auto_reopen_tradingview`).
 * A sleeping Mac does not scan. The scanner blocks idle sleep while it runs (`scan: keep_awake`, on by default),
   but closing the lid on battery still puts the Mac to sleep: keep it open during trading hours, or plug in
   with an external display.

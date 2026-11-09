@@ -128,3 +128,24 @@ def test_bitcoin_is_one_coin_per_lot_and_trades_all_week():
     assert spread_pips_for(btc, DEFAULT_COSTS) == DEFAULT_COSTS["btc_spread_pips"]
     saturday = datetime(2026, 11, 7, 12, tzinfo=timezone.utc)
     assert is_instrument_open("BTCUSD", saturday) and not is_instrument_open("EURUSD", saturday)
+
+
+def test_tradingview_reopened_with_the_port_when_it_runs_without_it():
+    import sys
+    from types import SimpleNamespace
+    from fxsignals.health import classify_error, reopen_tradingview, tv_unreachable
+    if sys.platform != "darwin":
+        return
+    calls, state = [], {"up": False}
+
+    def run(cmd):
+        calls.append(cmd[0])
+        if cmd[0] == "open":
+            state["up"] = True  # TradingView comes back with the port
+        return SimpleNamespace(returncode=0)  # pgrep: it is running (without the port)
+    assert reopen_tradingview(run=run, port_up=lambda p: state["up"], sleep=lambda s: None)
+    assert calls == ["pgrep", "osascript", "pkill", "open"]
+    calls.clear()
+    assert reopen_tradingview(run=run, port_up=lambda p: True, sleep=lambda s: None) and calls == []  # already fine
+    assert tv_unreachable(classify_error("CDP connection failed after 5 attempts: fetch failed", True))
+    assert not tv_unreachable(classify_error("timed out", True))

@@ -24,6 +24,50 @@ def internet_ok(timeout: float = 5.0) -> bool:
         return False
 
 
+TV_PORT = 9222
+TV_BINARY = "/Applications/TradingView.app/Contents/MacOS/TradingView"
+
+
+def tv_port_up(port: int = TV_PORT, timeout: float = 2.0) -> bool:
+    try:
+        urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version", timeout=timeout)  # noqa: S310 - local only
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def reopen_tradingview(port: int = TV_PORT, wait_s: float = 60.0, run=None, port_up=tv_port_up, sleep=None) -> bool:
+    """macOS: what the "TradingView for Signals" launcher does — quit TradingView if it runs without the
+    remote-debugging port (e.g. reopened by macOS after a restart) and start it again with the port.
+    True once the port answers."""
+    import subprocess
+    import sys
+    import time
+    run = run or (lambda cmd: subprocess.run(cmd, capture_output=True, timeout=30))
+    sleep = sleep or time.sleep
+    if port_up(port):
+        return True
+    if sys.platform != "darwin":
+        return False
+    if run(["pgrep", "-f", TV_BINARY]).returncode == 0:
+        run(["osascript", "-e", 'tell application "TradingView" to quit'])
+        sleep(4)
+        run(["pkill", "-TERM", "-f", TV_BINARY])
+        sleep(2)
+    run(["open", "-a", "TradingView", "--args", f"--remote-debugging-port={port}"])
+    waited = 0.0
+    while waited < wait_s:
+        sleep(2)
+        waited += 2
+        if port_up(port):
+            return True
+    return False
+
+
+def tv_unreachable(problem: str) -> bool:
+    return problem.startswith("TradingView Desktop is closed or not reachable")
+
+
 def classify_error(err: str, online: bool) -> str:
     e = err.lower()
     if not online:

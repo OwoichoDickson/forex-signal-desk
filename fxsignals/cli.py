@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import all_pairs, load_config
-from .health import HealthMonitor, classify_error, data_problem, internet_ok
+from .health import HealthMonitor, classify_error, data_problem, internet_ok, reopen_tradingview, tv_unreachable
 from .weekly import run_if_due as run_weekly_if_due
 from .logging_setup import log, setup_logging
 from .report import format_terminal
@@ -95,6 +95,7 @@ def cmd_run(cfg, args) -> int:
     signal.signal(signal.SIGTERM, _stop)
     log(logger, logging.INFO, "scheduler started", interval_min=interval / 60)
     health = HealthMonitor(cfg)
+    last_reopen: dict = {}
     while not stop["flag"]:
         started = time.monotonic()
         try:
@@ -113,7 +114,19 @@ def cmd_run(cfg, args) -> int:
             health.alive("scan already running")
         except Exception as e:  # noqa: BLE001 - keep the scheduler alive, alert, retry next tick
             log(logger, logging.ERROR, "scan failed", error=str(e))
-            health.problem(classify_error(str(e), internet_ok()))
+            problem = classify_error(str(e), internet_ok())
+            health.problem(problem)
+            # after a restart macOS reopens TradingView without the debugging port: reopen it with the port
+            # (at most every 10 minutes) and scan again straight away
+            if tv_unreachable(problem) and cfg["scan"].get("auto_reopen_tradingview", True) \
+                    and time.monotonic() - last_reopen.get("t", -1e9) > 600:
+                last_reopen["t"] = time.monotonic()
+                ok = reopen_tradingview()
+                log(logger, logging.WARNING if ok else logging.ERROR,
+                    "TradingView reopened with the debugging port" if ok else "could not reopen TradingView with the debugging port")
+                if ok:
+                    time.sleep(20)  # let the chart load
+                    continue
         try:
             run_weekly_if_due(cfg)  # weekend only; blocks this loop for the duration (no scans on weekends anyway)
         except Exception as e:  # noqa: BLE001
